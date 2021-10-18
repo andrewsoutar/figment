@@ -1,11 +1,10 @@
 (uiop:define-package #:com.andrewsoutar.figment/x11
-  (:use #:cl #:cffi)
+  (:use #:cl #:cffi #:com.andrewsoutar.just-enough-x11)
   (:use #:com.andrewsoutar.figment/utils))
 (cl:in-package #:com.andrewsoutar.figment/x11)
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (define-foreign-library libxcb (t (:default "libxcb"))))
-(use-foreign-library libxcb)
+(define-from-xml "xproto"
+  map-window)
 
 (defcfun xcb-connect :pointer
   (display :string)
@@ -22,44 +21,6 @@
 (defcfun xcb-generate-id :uint32
   (connection :pointer))
 
-;;; HACK
-(defctype size-t #+64-bit :uint64 #+32-bit :uint32)
-
-;;; FIXME only checked this on Linux
-(defcstruct iovec
-  (base :pointer)
-  (len size-t))
-
-(defcstruct xcb-protocol-request
-  (count size-t)
-  (ext :pointer)
-  (opcode :uint8)
-  (isvoid :uint8))
-
-(defcfun xcb-send-request-with-fds64 :uint64
-  (connection :pointer)
-  (flags :int)
-  (vector (:pointer (:struct iovec)))
-  (req (:pointer (:struct xcb-protocol-request)))
-  (n-fds :uint)
-  (fds (:pointer :int)))
-
-(defun xcb-send (connection opcode has-reply buffer fds &optional extension)
-  (declare (type foreign-pointer connection)
-           (type (unsigned-byte 8) opcode)
-           (type (simple-array (unsigned-byte 8) (*)) buffer)
-           (type (or null (simple-array (signed-byte 32) (*))) fds)
-           (type (or null foreign-pointer) extension))
-  (sb-sys:with-pinned-objects (buffer fds)
-    (let ((buffer-sap (sb-sys:vector-sap buffer))
-          (fds-sap (if fds (sb-sys:vector-sap fds) (null-pointer))))
-      (with-foreign-objects ((iovec '(:struct iovec) 3)
-                             (req '(:struct xcb-protocol-request)))
-        (setf (mem-aref iovec '(:struct iovec) 2) (list 'base buffer-sap 'len (length buffer)))
-        (setf (mem-ref req '(:struct xcb-protocol-request))
-              (list 'count 1 'ext (or extension (null-pointer)) 'opcode opcode 'isvoid (if has-reply 0 1)))
-        (xcb-send-request-with-fds64 connection 0 (mem-aptr iovec '(:struct iovec) 2)
-                                     req (length fds) fds-sap)))))
 
 (defun xcb-create-window (connection depth wid parent x y width height border-width class visual
                           &key background-pixmap background-pixel border-pixmap border-pixel
@@ -169,17 +130,8 @@
                                      (setf (ldb (byte ,bit 0) (sb-sys:sap-ref-32 buffer-sap 28)) 1
                                            (,(if signed 'sb-sys:signed-sap-ref-32 'sb-sys:sap-ref-32) buffer-sap
                                             (prog1 offset (incf offset 4)))
-                                           ,value)))))))
-      (xcb-send connection 1 nil buffer ()))))
-
-(defun xcb-map-window (connection window)
-  (declare (type foreign-pointer connection)
-           (type (unsigned-byte 29) window))
-  (let ((buffer (make-array 8 :element-type '(unsigned-byte 8))))
-    (sb-sys:with-pinned-objects (buffer)
-      (let ((buffer-sap (sb-sys:vector-sap buffer)))
-        (setf (sb-sys:sap-ref-32 buffer-sap 4) window)))
-    (xcb-send connection 8 nil buffer ())))
+                                           ,value)))))
+          (com.andrewsoutar.just-enough-x11/codegen::xcb-send connection 1 nil buffer-sap (length buffer) nil 0))))))
 
 (defun main ()
   (with-cleanups ((conn (xcb-connect (null-pointer) (null-pointer)) #'xcb-disconnect))
@@ -195,7 +147,7 @@
            (win (xcb-generate-id conn)))
       (assert root)
       (xcb-create-window conn :copy-from-parent win root 0 0 600 400 10 :input-output visual)
-      (xcb-map-window conn win)
+      (map-window conn win)
       (unless (= (xcb-flush conn) 1)
         (error "xcb_flush"))
       (sleep 100))))
