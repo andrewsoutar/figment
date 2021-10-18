@@ -1,0 +1,8 @@
+* Figment :: The editor I imagine
+  When I say "I", I mean myself - andrewsoutar. This project is, first
+  and foremost, an experiment in how to make an editor that would
+  improve my productivity and enjoyment. It's also a way for me to
+  experiment with writing "proper" GUI apps in Common Lisp.
+
+  There's nothing here right now, and you probably shouldn't be using
+  this. But I can't stop you, so here we are. Have fun, I guess.
