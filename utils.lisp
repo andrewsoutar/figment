@@ -1,6 +1,6 @@
 (uiop:define-package #:com.andrewsoutar.figment/utils
   (:use #:cl)
-  (:export #:with-cleanups))
+  (:export #:with-cleanups #:nest))
 (cl:in-package #:com.andrewsoutar.figment/utils)
 
 (defmacro with-cleanups ((&rest bindings) &body body)
@@ -14,3 +14,7 @@
              (unwind-protect (with-cleanups ,(rest bindings) ,@body)
                (funcall ,cleanup-fun ,temp)))))
       `(locally ,@body)))
+
+(defmacro nest (&body body)
+  (destructuring-bind (first &rest rest) body
+    (if rest `(,@first (nest ,@rest)) first)))
