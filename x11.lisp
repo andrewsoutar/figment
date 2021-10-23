@@ -1,6 +1,6 @@
 (uiop:define-package #:com.andrewsoutar.figment/x11
   (:use #:cl #:alexandria #:cffi #:com.andrewsoutar.just-enough-x11)
-  (:use #:com.andrewsoutar.figment/utils))
+  (:use #:com.andrewsoutar.figment/utils #:com.andrewsoutar.figment/vulkan-bind))
 (cl:in-package #:com.andrewsoutar.figment/x11)
 
 (define-from-xml "xproto"
@@ -31,8 +31,10 @@
     (t (:default "libvulkan"))))
 (use-foreign-library libvulkan)
 
+(gen-vulkan-bindings ()
+  structure-type)
+
 (defctype vk-result :int)
-(defctype vk-structure-type :int)
 (defctype vk-flags :uint32)
 (defctype vk-dispatchable :pointer)
 (defctype vk-non-dispatchable :uint64)
@@ -79,7 +81,7 @@
 
 
 (defcstruct %instance-create-info
-  (stype vk-structure-type)
+  (stype structure-type)
   (next :pointer)
   (flags vk-flags)
   (application-info :pointer)
@@ -103,7 +105,7 @@
     (dotimes (i (length layers)) (setf (mem-aref layers-arr :pointer i) (null-pointer)))
     (dotimes (i (length extensions)) (setf (mem-aref extensions-arr :pointer i) (null-pointer)))
     (setf (mem-ref create-info '(:struct %instance-create-info))
-          (list 'stype 1 'next (null-pointer) 'flags 0 'application-info (null-pointer)
+          (list 'stype :instance-create-info 'next (null-pointer) 'flags 0 'application-info (null-pointer)
                 'enabled-layer-count (length layers) 'enabled-layers layers-arr
                 'enabled-extension-count (length extensions) 'enabled-extensions extensions-arr))
     (unwind-protect
@@ -149,7 +151,7 @@
          (let ((create-name (intern (format nil "%CREATE-~A" name) (symbol-package name)))
                (create-info-name (intern (format nil "%~A-CREATE-INFO" name) (symbol-package name))))
            `((defcstruct ,create-info-name
-               (stype vk-structure-type)
+               (stype structure-type)
                (next :pointer)
                ,@create-info-fields)
              (defvkfun (,create-name
@@ -198,7 +200,7 @@
   (%destroy-surface (aref *instance*) surface (null-pointer)))
 
 (defcstruct %xcb-surface-create-info
-  (stype vk-structure-type)
+  (stype structure-type)
   (next :pointer)
   (flags vk-flags)
   (connection :pointer)
@@ -336,14 +338,14 @@
 (defctype device vk-dispatchable)
 
 (defcstruct device-queue-create-info
-  (stype vk-structure-type)
+  (stype structure-type)
   (next :pointer)
   (flags vk-flags)
   (queue-family-index :uint32)
   (queue-count :uint32)
   (queue-priorities (:pointer :float)))
 (defcstruct device-create-info
-  (stype vk-structure-type)
+  (stype structure-type)
   (next :pointer)
   (flags vk-flags)
   (queue-create-info-count :uint32)
@@ -376,13 +378,13 @@
            (dotimes (i (length extensions))
              (setf (mem-aref extension-names :pointer i) (foreign-string-alloc (svref extensions i))))
            (setf (mem-ref device-create-info '(:struct device-create-info))
-                 (list 'stype 3 'next (null-pointer) 'flags 0
+                 (list 'stype :device-create-info 'next (null-pointer) 'flags 0
                        'queue-create-info-count 1 'queue-create-infos queue-create-info
                        'enabled-layer-count 0 'enabled-layer-names (null-pointer)
                        'enabled-extension-count (length extensions) 'enabled-extension-names extension-names
                        'enabled-features (null-pointer)))
            (setf (mem-ref queue-create-info '(:struct device-queue-create-info))
-                 (list 'stype 2 'next (null-pointer) 'flags 0
+                 (list 'stype :device-queue-create-info 'next (null-pointer) 'flags 0
                        'queue-family-index queue 'queue-count 1 'queue-priorities priorities))
            (setf (mem-aref priorities :float 0) queue-priority)
            (unless (zerop (%create-device physical-device device-create-info (null-pointer) device))
@@ -433,7 +435,7 @@
 (defctype swapchain vk-non-dispatchable)
 
 (defcstruct swapchain-create-info
-  (stype vk-structure-type)
+  (stype structure-type)
   (next :pointer)
   (flags vk-flags)
   (surface surface)
@@ -503,7 +505,7 @@
   (base-array-layer :uint32)
   (layer-count :uint32))
 (defcstruct image-view-create-info
-  (stype vk-structure-type)
+  (stype structure-type)
   (next :pointer)
   (flags vk-flags)
   (image image)
@@ -521,7 +523,7 @@
   (with-foreign-objects ((view 'image-view)
                          (create-info '(:struct image-view-create-info)))
     (setf (mem-ref create-info '(:struct image-view-create-info))
-          (list 'stype 15 'next (null-pointer) 'flags 0
+          (list 'stype :image-view-create-info 'next (null-pointer) 'flags 0
                 'image image 'view-type 1 ; VK_IMAGE_VIEW_TYPE_2D
                 'format *image-format*
                 'components '(r 0 b 0 g 0 a 0)
@@ -607,7 +609,7 @@
 (defctype shader-module vk-non-dispatchable)
 
 (defcstruct shader-module-create-info
-  (stype vk-structure-type)
+  (stype structure-type)
   (next :pointer)
   (flags vk-flags)
   (code-size :size)
@@ -622,7 +624,7 @@
                          (create-info '(:struct shader-module-create-info)))
     (with-pointer-to-vector-data (code-ptr code)
       (setf (mem-ref create-info '(:struct shader-module-create-info))
-            (list 'stype 16 'next (null-pointer) 'flags 0
+            (list 'stype :shader-module-create-info 'next (null-pointer) 'flags 0
                   'code-size (length code) 'code code-ptr))
       (unless (zerop (%create-shader-module (aref *device*) create-info (null-pointer) shader-module))
         (error "vkCreateShaderModule"))
@@ -639,7 +641,7 @@
 (defctype pipeline-layout vk-non-dispatchable)
 
 (defcstruct pipeline-layout-create-info
-  (stype vk-structure-type)
+  (stype structure-type)
   (next :pointer)
   (flags vk-flags)
   (set-layout-count :uint32)
@@ -655,7 +657,7 @@
   (with-foreign-objects ((layout 'pipeline-layout)
                          (create-info '(:struct pipeline-layout-create-info)))
     (setf (mem-ref create-info '(:struct pipeline-layout-create-info))
-          (list 'stype 30 'next (null-pointer) 'flags 0
+          (list 'stype :pipeline-layout-create-info 'next (null-pointer) 'flags 0
                 'set-layout-count 0 'set-layouts (null-pointer)
                 'push-constant-range-count 0 'push-constant-ranges (null-pointer)))
     (unless (zerop (%create-pipeline-layout (aref *device*) create-info (null-pointer) layout))
@@ -697,7 +699,7 @@
   (preserve-attachment-count :uint32)
   (preserve-attachments (:pointer :uint32)))
 (defcstruct render-pass-create-info
-  (stype vk-structure-type)
+  (stype structure-type)
   (next :pointer)
   (flags vk-flags)
   (attachment-count :uint32)
@@ -722,7 +724,7 @@
       (setf (mem-aref attachments-ptr '(:struct attachment-description) i) (aref attachments i)))
     (setf (mem-ref subpass-ptr '(:struct subpass-description)) subpass)
     (setf (mem-ref create-info '(:struct render-pass-create-info))
-          (list 'stype 38 'next (null-pointer) 'flags 0
+          (list 'stype :render-pass-create-info 'next (null-pointer) 'flags 0
                 'attachment-count (length attachments) 'attachments attachments-ptr
                 'subpass-count 1 'subpasses subpass-ptr
                 'dependency-count 0 'dependencies (null-pointer)))
@@ -747,7 +749,7 @@
   (%destroy-pipeline (aref *device*) pipeline (null-pointer)))
 
 (defcstruct pipeline-shader-stage-create-info
-  (stype vk-structure-type)
+  (stype structure-type)
   (next :pointer)
   (flags vk-flags)
   (stage :int)
@@ -756,7 +758,7 @@
   (specialization-info :pointer))
 
 (defcstruct pipeline-vertex-input-state-create-info
-  (stype vk-structure-type)
+  (stype structure-type)
   (next :pointer)
   (flags vk-flags)
   (vertex-binding-description-count :uint32)
@@ -765,7 +767,7 @@
   (vertex-attribute-descriptions :pointer))
 
 (defcstruct pipeline-input-assembly-state-create-info
-  (stype vk-structure-type)
+  (stype structure-type)
   (next :pointer)
   (flags vk-flags)
   (topology :int)
@@ -776,7 +778,7 @@
   (width :float) (height :float)
   (min-depth :float) (max-depth :float))
 (defcstruct pipeline-viewport-state-create-info
-  (stype vk-structure-type)
+  (stype structure-type)
   (next :pointer)
   (flags vk-flags)
   (viewport-count :uint32)
@@ -785,7 +787,7 @@
   (scissors (:pointer (:struct rect-2d))))
 
 (defcstruct pipeline-rasterization-state-create-info
-  (stype vk-structure-type)
+  (stype structure-type)
   (next :pointer)
   (flags vk-flags)
   (depth-clamp-enable :uint32)
@@ -800,7 +802,7 @@
   (line-width :float))
 
 (defcstruct pipeline-multisample-state-create-info
-  (stype vk-structure-type)
+  (stype structure-type)
   (next :pointer)
   (flags vk-flags)
   (rasterization-samples :int)
@@ -820,7 +822,7 @@
   (alpha-blend-op :int)
   (color-write-mask vk-flags))
 (defcstruct pipeline-color-blend-state-create-info
-  (stype vk-structure-type)
+  (stype structure-type)
   (next :pointer)
   (flags vk-flags)
   (logic-op-enable :uint32)
@@ -830,7 +832,7 @@
   (blend-constants (:array :float 4)))
 
 (defcstruct graphics-pipeline-create-info
-  (stype vk-structure-type)
+  (stype structure-type)
   (next :pointer)
   (flags vk-flags)
   (stage-count :uint32)
@@ -873,24 +875,24 @@
                          (color-blend-state '(:struct pipeline-color-blend-state-create-info)))
     (with-foreign-string (str-main "main")
       (setf (mem-aref stages-info '(:struct pipeline-shader-stage-create-info) 0)
-            (list 'stype 18 'next (null-pointer) 'flags 0
+            (list 'stype :pipeline-shader-stage-create-info 'next (null-pointer) 'flags 0
                   'stage #x00000001     ; VK_SHADER_STAGE_VERTEX_BIT
                   'module vertex-module 'name str-main
                   'specialization-info (null-pointer)))
       (setf (mem-aref stages-info '(:struct pipeline-shader-stage-create-info) 1)
-            (list 'stype 18 'next (null-pointer) 'flags 0
+            (list 'stype :pipeline-shader-stage-create-info 'next (null-pointer) 'flags 0
                   'stage #x00000010     ; VK_SHADER_STAGE_FRAGMENT_BIT
                   'module fragment-module 'name str-main
                   'specialization-info (null-pointer)))
 
       (setf (mem-ref vertex-input-state '(:struct pipeline-vertex-input-state-create-info))
-            (list 'stype 19 'next (null-pointer) 'flags 0
+            (list 'stype :pipeline-vertex-input-state-create-info 'next (null-pointer) 'flags 0
                   'vertex-binding-description-count 0
                   'vertex-binding-descriptions (null-pointer)
                   'vertex-attribute-description-count 0
                   'vertex-attribute-descriptions (null-pointer)))
       (setf (mem-ref input-assembly-state '(:struct pipeline-input-assembly-state-create-info))
-            (list 'stype 20 'next (null-pointer) 'flags 0
+            (list 'stype :pipeline-input-assembly-state-create-info 'next (null-pointer) 'flags 0
                   'topology 3    ; VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
                   'primitive-restart-enable 0))
 
@@ -899,12 +901,12 @@
       (setf (mem-aref scissor '(:struct rect-2d) 0)
             '(offset (x 0 y 0) extent (width 600 height 400)))
       (setf (mem-ref viewport-state '(:struct pipeline-viewport-state-create-info))
-            (list 'stype 22 'next (null-pointer) 'flags 0
+            (list 'stype :pipeline-viewport-state-create-info 'next (null-pointer) 'flags 0
                   'viewport-count 1 'viewports viewport
                   'scissor-count 1 'scissors scissor))
 
       (setf (mem-ref rasterization-state '(:struct pipeline-rasterization-state-create-info))
-            (list 'stype 23 'next (null-pointer) 'flags 0
+            (list 'stype :pipeline-rasterization-state-create-info 'next (null-pointer) 'flags 0
                   'depth-clamp-enable 0 'rasterizer-discard-enable 0
                   'polygon-mode 0    ; VK_POLYGON_MODE_FILL
                   'cull-mode 0       ; VK_CULL_MODE_NONE
@@ -914,7 +916,7 @@
                   'line-width 1.0f0))
 
       (setf (mem-ref multisample-state '(:struct pipeline-multisample-state-create-info))
-            (list 'stype 24 'next (null-pointer) 'flags 0
+            (list 'stype :pipeline-multisample-state-create-info 'next (null-pointer) 'flags 0
                   'rasterization-samples #x00000001 ; VK_SAMPLE_COUNT_1_BIT
                   'sample-shading-enable 0 'min-sample-shading 1.0f0
                   'sample-mask (null-pointer)
@@ -924,14 +926,14 @@
             '(blend-enable 0 src-color-blend-factor 1 dst-color-blend-factor 0 color-blend-op 0
               src-alpha-blend-factor 1 dst-alpha-blend-factor 0 alpha-blend-op 0 color-write-mask 15))
       (setf (mem-ref color-blend-state '(:struct pipeline-color-blend-state-create-info))
-            (list 'stype 26 'next (null-pointer) 'flags 0
+            (list 'stype :pipeline-color-blend-state-create-info 'next (null-pointer) 'flags 0
                   'logic-op-enable 0 'logic-op 0
                   'attachment-count 1 'attachments attachments))
       (setf (foreign-slot-value color-blend-state '(:struct pipeline-color-blend-state-create-info) 'blend-constants)
             #(0.0f0 0.0f0 0.0f0 0.0f0))
 
       (setf (mem-ref create-info '(:struct graphics-pipeline-create-info))
-            (list* 'stype 28 'next (null-pointer) 'flags 0
+            (list* 'stype :graphics-pipeline-create-info 'next (null-pointer) 'flags 0
                    'stage-count 2 'stages stages-info
                    'tessellation-state (null-pointer)
                    'depth-stencil-state (null-pointer)
@@ -951,7 +953,7 @@
 (defctype framebuffer vk-non-dispatchable)
 
 (defcstruct framebuffer-create-info
-  (stype vk-structure-type)
+  (stype structure-type)
   (next :pointer)
   (flags vk-flags)
   (render-pass render-pass)
@@ -971,7 +973,7 @@
                          (attachment 'image-view 1))
     (setf (mem-ref attachment 'image-view) image-view)
     (setf (mem-ref create-info '(:struct framebuffer-create-info))
-          (list 'stype 37 'next (null-pointer) 'flags 0
+          (list 'stype :framebuffer-create-info 'next (null-pointer) 'flags 0
                 'render-pass render-pass
                 'attachment-count 1 'attachments attachment
                 'width 600 'height 400 'layers 1))
@@ -990,7 +992,7 @@
 (defctype command-pool vk-non-dispatchable)
 
 (defcstruct command-pool-create-info
-  (stype vk-structure-type)
+  (stype structure-type)
   (next :pointer)
   (flags vk-flags)
   (queue-family-index :uint32))
@@ -1003,7 +1005,7 @@
   (with-foreign-objects ((command-pool 'command-pool)
                          (create-info '(:struct command-pool-create-info)))
     (setf (mem-ref create-info '(:struct command-pool-create-info))
-          (list 'stype 39 'next (null-pointer) 'flags 0
+          (list 'stype :command-pool-create-info 'next (null-pointer) 'flags 0
                 'queue-family-index queue-family-index))
     (unless (zerop (%create-command-pool (aref *device*) create-info (null-pointer) command-pool))
       (error "vkCreateCommandPool"))
@@ -1020,7 +1022,7 @@
 (defctype command-buffer vk-dispatchable)
 
 (defcstruct command-buffer-allocate-info
-  (stype vk-structure-type)
+  (stype structure-type)
   (next :pointer)
   (command-pool command-pool)
   (level :int)
@@ -1032,7 +1034,7 @@
 (defun allocate-command-buffers (command-buffers n-command-buffers command-pool)
   (with-foreign-object (allocate-info '(:struct command-buffer-allocate-info))
     (setf (mem-ref allocate-info '(:struct command-buffer-allocate-info))
-          (list 'stype 40 'next (null-pointer)
+          (list 'stype :command-buffer-allocate-info 'next (null-pointer)
                 'command-pool command-pool 'level 0 'command-buffer-count n-command-buffers))
     (unless (zerop (%allocate-command-buffers (aref *device*) allocate-info command-buffers))
       (error "vkAllocateCommandBuffers"))))
@@ -1059,7 +1061,7 @@
                 (error "~A" ',vk-name))))))
 
 (defcstruct command-buffer-begin-info
-  (stype vk-structure-type)
+  (stype structure-type)
   (next :pointer)
   (flags vk-flags)
   (inheritance-info :pointer))
@@ -1069,7 +1071,7 @@
 (defun begin-command-buffer (command-buffer)
   (with-foreign-object (begin-info '(:struct command-buffer-begin-info))
     (setf (mem-ref begin-info '(:struct command-buffer-begin-info))
-          (list 'stype 42 'next (null-pointer) 'flags 0 'inheritance-info (null-pointer)))
+          (list 'stype :command-buffer-begin-info 'next (null-pointer) 'flags 0 'inheritance-info (null-pointer)))
     (%begin-command-buffer command-buffer begin-info)))
 
 (defvk :device (end-command-buffer "vkEndCommandBuffer")
@@ -1086,7 +1088,7 @@
   (color (:union clear-color-value))
   (depth-stencil (:union clear-depth-stencil-value)))
 (defcstruct render-pass-begin-info
-  (stype vk-structure-type)
+  (stype structure-type)
   (next :pointer)
   (render-pass render-pass)
   (framebuffer framebuffer)
@@ -1117,7 +1119,7 @@
 (defctype semaphore vk-non-dispatchable)
 
 (defcstruct semaphore-create-info
-  (stype vk-structure-type)
+  (stype structure-type)
   (next :pointer)
   (flags vk-flags))
 (defvk :device (%create-semaphore "vkCreateSemaphore")
@@ -1129,7 +1131,7 @@
   (with-foreign-objects ((semaphore 'semaphore)
                          (create-info '(:struct semaphore-create-info)))
     (setf (mem-ref create-info '(:struct semaphore-create-info))
-          (list 'stype 9 'next (null-pointer) 'flags 0))
+          (list 'stype :semaphore-create-info 'next (null-pointer) 'flags 0))
     (%create-semaphore (aref *device*) create-info (null-pointer) semaphore)
     (mem-ref semaphore 'semaphore)))
 
@@ -1144,7 +1146,7 @@
 (defctype fence vk-non-dispatchable)
 
 (defcstruct fence-create-info
-  (stype vk-structure-type)
+  (stype structure-type)
   (next :pointer)
   (flags vk-flags))
 (defvk :device (%create-fence "vkCreateFence")
@@ -1156,7 +1158,7 @@
   (with-foreign-objects ((fence 'fence)
                          (create-info '(:struct fence-create-info)))
     (setf (mem-ref create-info '(:struct fence-create-info))
-          (list 'stype 8 'next (null-pointer) 'flags 0))
+          (list 'stype :fence-create-info 'next (null-pointer) 'flags 0))
     (%create-fence (aref *device*) create-info (null-pointer) fence)
     (mem-ref fence 'fence)))
 
@@ -1186,7 +1188,7 @@
 
 
 (defcstruct submit-info
-  (stype vk-structure-type)
+  (stype structure-type)
   (next :pointer)
   (wait-semaphore-count :uint32)
   (wait-semaphores (:pointer semaphore))
@@ -1203,7 +1205,7 @@
 
 
 (defcstruct present-info
-  (stype vk-structure-type)
+  (stype structure-type)
   (next :pointer)
   (wait-semaphore-count :uint32)
   (wait-semaphores (:pointer semaphore))
@@ -1301,7 +1303,7 @@
                                     '(:union clear-color-value) 'float32)
                 #(1.0f0 1.0f0 1.0f0 1.0f0))
           (setf (mem-ref begin-info '(:struct render-pass-begin-info))
-                (list 'stype 43 'next (null-pointer)
+                (list 'stype :render-pass-begin-info 'next (null-pointer)
                       'render-pass render-pass 'framebuffer (aref framebuffers i)
                       'render-area '(offset (x 0 y 0) extent (width 600 height 400))
                       'clear-value-count 1 'clear-values clear-values))
@@ -1330,7 +1332,7 @@
           (setf (mem-aref wait-masks 'vk-flags 0) #x00000001)
           (setf (mem-aref signal-semaphores 'semaphore 0) render-finished-sem)
           (setf (mem-aref submit-info '(:struct submit-info) 0)
-                (list 'stype 4 'next (null-pointer)
+                (list 'stype :submit-info 'next (null-pointer)
                       'wait-semaphore-count 1 'wait-semaphores wait-semaphores 'wait-dst-stage-mask wait-masks
                       'command-buffer-count 1 'command-buffers (mem-aptr cmd-bufs 'command-buffer image-index)
                       'signal-semaphore-count 1 'signal-semaphores signal-semaphores))
