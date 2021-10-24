@@ -31,11 +31,14 @@
     (t (:default "libvulkan"))))
 (use-foreign-library libvulkan)
 
+(defctype flags :uint32)
 (gen-vulkan-bindings ()
-  structure-type)
+  structure-type
+  instance-create-info
+  flags)
 
 (defctype vk-result :int)
-(defctype vk-flags :uint32)
+
 (defctype vk-dispatchable :pointer)
 (defctype vk-non-dispatchable :uint64)
 
@@ -83,7 +86,7 @@
 (defcstruct %instance-create-info
   (stype structure-type)
   (next :pointer)
-  (flags vk-flags)
+  (flags flags)
   (application-info :pointer)
   (enabled-layer-count :uint32)
   (enabled-layers (:pointer :string))
@@ -176,7 +179,7 @@
 
 #+nil
 (define-vulkan-object (instance :dispatchable :create-structure-type 1 :param nil)
-  (flags vk-flags)
+  (flags flags)
   (application-info :pointer)
   (enabled-layer-count :uint32)
   (enabled-layers (:pointer :string))
@@ -187,7 +190,7 @@
 (define-vulkan-object (surface :non-dispatchable :suffix "KHR"))
 #+nil
 (define-vulkan-object (xcb-surface :none :create-structure-type 1000005000 :suffix "KHR" :actual-object-name surface)
-  (flags vk-flags)
+  (flags flags)
   (connection :pointer)
   (window :uint32))
 
@@ -202,7 +205,7 @@
 (defcstruct %xcb-surface-create-info
   (stype structure-type)
   (next :pointer)
-  (flags vk-flags)
+  (flags flags)
   (connection :pointer)
   (window :uint32))
 (define-vulkan-instance-fun (%create-xcb-surface "vkCreateXcbSurfaceKHR") vk-result
@@ -239,7 +242,7 @@
   (phys-devs (:pointer physical-device)))
 
 (defcstruct queue-family-properties
-  (queue-flags vk-flags)
+  (queue-flags flags)
   (queue-count :uint32)
   (timestamp-valid-bits :uint32)
   (min-image-transfer-granularity (:struct extent-3d)))
@@ -340,14 +343,14 @@
 (defcstruct device-queue-create-info
   (stype structure-type)
   (next :pointer)
-  (flags vk-flags)
+  (flags flags)
   (queue-family-index :uint32)
   (queue-count :uint32)
   (queue-priorities (:pointer :float)))
 (defcstruct device-create-info
   (stype structure-type)
   (next :pointer)
-  (flags vk-flags)
+  (flags flags)
   (queue-create-info-count :uint32)
   (queue-create-infos (:pointer (:struct device-queue-create-info)))
   (enabled-layer-count :uint32)
@@ -422,7 +425,7 @@
   (supported-transforms :int)
   (current-transform :int)
   (supported-composite-alpha :int)
-  (supported-usage-flags vk-flags))
+  (supported-usage-flags flags))
 
 (define-vulkan-instance-fun (get-physical-device-surface-capabilities
                              "vkGetPhysicalDeviceSurfaceCapabilitiesKHR")
@@ -437,14 +440,14 @@
 (defcstruct swapchain-create-info
   (stype structure-type)
   (next :pointer)
-  (flags vk-flags)
+  (flags flags)
   (surface surface)
   (min-image-count :uint32)
   (image-format :int)
   (image-color-space :int)
   (image-extent (:struct extent-2d))
   (image-array-layers :uint32)
-  (image-usage vk-flags)
+  (image-usage flags)
   (image-sharing-mode :int)
   (queue-family-index-count :uint32)
   (queue-family-indices (:pointer :uint32))
@@ -499,7 +502,7 @@
 
 (defcstruct component-mapping (r :int) (g :int) (b :int) (a :int))
 (defcstruct image-subresource-range
-  (aspect-mask vk-flags)
+  (aspect-mask flags)
   (base-mip-level :uint32)
   (level-count :uint32)
   (base-array-layer :uint32)
@@ -507,7 +510,7 @@
 (defcstruct image-view-create-info
   (stype structure-type)
   (next :pointer)
-  (flags vk-flags)
+  (flags flags)
   (image image)
   (view-type :int)
   (format :int)
@@ -611,7 +614,7 @@
 (defcstruct shader-module-create-info
   (stype structure-type)
   (next :pointer)
-  (flags vk-flags)
+  (flags flags)
   (code-size :size)
   (code (:pointer :uint32)))
 (define-vulkan-device-fun (%create-shader-module "vkCreateShaderModule") vk-result
@@ -643,7 +646,7 @@
 (defcstruct pipeline-layout-create-info
   (stype structure-type)
   (next :pointer)
-  (flags vk-flags)
+  (flags flags)
   (set-layout-count :uint32)
   (set-layouts :pointer)
   (push-constant-range-count :uint32)
@@ -678,7 +681,7 @@
   (attachment :uint32)
   (layout :int))
 (defcstruct attachment-description
-  (flags vk-flags)
+  (flags flags)
   (format :int)
   (samples :int)
   (load-op :int)
@@ -688,7 +691,7 @@
   (initial-layout :int)
   (final-layout :int))
 (defcstruct subpass-description
-  (flags vk-flags)
+  (flags flags)
   (pipeline-bind-point :int)
   (input-attachment-count :uint32)
   (input-attachments (:pointer (:struct attachment-reference)))
@@ -701,7 +704,7 @@
 (defcstruct render-pass-create-info
   (stype structure-type)
   (next :pointer)
-  (flags vk-flags)
+  (flags flags)
   (attachment-count :uint32)
   (attachments (:pointer (:struct attachment-description)))
   (subpass-count :uint32)
@@ -751,7 +754,7 @@
 (defcstruct pipeline-shader-stage-create-info
   (stype structure-type)
   (next :pointer)
-  (flags vk-flags)
+  (flags flags)
   (stage :int)
   (module shader-module)
   (name :string)
@@ -760,7 +763,7 @@
 (defcstruct pipeline-vertex-input-state-create-info
   (stype structure-type)
   (next :pointer)
-  (flags vk-flags)
+  (flags flags)
   (vertex-binding-description-count :uint32)
   (vertex-binding-descriptions :pointer)
   (vertex-attribute-description-count :uint32)
@@ -769,7 +772,7 @@
 (defcstruct pipeline-input-assembly-state-create-info
   (stype structure-type)
   (next :pointer)
-  (flags vk-flags)
+  (flags flags)
   (topology :int)
   (primitive-restart-enable :uint32))
 
@@ -780,7 +783,7 @@
 (defcstruct pipeline-viewport-state-create-info
   (stype structure-type)
   (next :pointer)
-  (flags vk-flags)
+  (flags flags)
   (viewport-count :uint32)
   (viewports (:pointer (:struct viewport)))
   (scissor-count :uint32)
@@ -789,11 +792,11 @@
 (defcstruct pipeline-rasterization-state-create-info
   (stype structure-type)
   (next :pointer)
-  (flags vk-flags)
+  (flags flags)
   (depth-clamp-enable :uint32)
   (rasterizer-discard-enable :uint32)
   (polygon-mode :int)
-  (cull-mode vk-flags)
+  (cull-mode flags)
   (front-face :int)
   (depth-bias-enable :uint32)
   (depth-bias-constant-factor :float)
@@ -804,7 +807,7 @@
 (defcstruct pipeline-multisample-state-create-info
   (stype structure-type)
   (next :pointer)
-  (flags vk-flags)
+  (flags flags)
   (rasterization-samples :int)
   (sample-shading-enable :uint32)
   (min-sample-shading :float)
@@ -820,11 +823,11 @@
   (src-alpha-blend-factor :int)
   (dst-alpha-blend-factor :int)
   (alpha-blend-op :int)
-  (color-write-mask vk-flags))
+  (color-write-mask flags))
 (defcstruct pipeline-color-blend-state-create-info
   (stype structure-type)
   (next :pointer)
-  (flags vk-flags)
+  (flags flags)
   (logic-op-enable :uint32)
   (logic-op :int)
   (attachment-count :uint32)
@@ -834,7 +837,7 @@
 (defcstruct graphics-pipeline-create-info
   (stype structure-type)
   (next :pointer)
-  (flags vk-flags)
+  (flags flags)
   (stage-count :uint32)
   (stages (:pointer (:struct pipeline-shader-stage-create-info)))
   (vertex-input-state (:pointer (:struct pipeline-vertex-input-state-create-info)))
@@ -955,7 +958,7 @@
 (defcstruct framebuffer-create-info
   (stype structure-type)
   (next :pointer)
-  (flags vk-flags)
+  (flags flags)
   (render-pass render-pass)
   (attachment-count :uint32)
   (attachments (:pointer image-view))
@@ -994,7 +997,7 @@
 (defcstruct command-pool-create-info
   (stype structure-type)
   (next :pointer)
-  (flags vk-flags)
+  (flags flags)
   (queue-family-index :uint32))
 (define-vulkan-device-fun (%create-command-pool "vkCreateCommandPool") vk-result
   (device device)
@@ -1063,7 +1066,7 @@
 (defcstruct command-buffer-begin-info
   (stype structure-type)
   (next :pointer)
-  (flags vk-flags)
+  (flags flags)
   (inheritance-info :pointer))
 (defvk :device (%begin-command-buffer "vkBeginCommandBuffer")
   command-buffer
@@ -1121,7 +1124,7 @@
 (defcstruct semaphore-create-info
   (stype structure-type)
   (next :pointer)
-  (flags vk-flags))
+  (flags flags))
 (defvk :device (%create-semaphore "vkCreateSemaphore")
   device
   (create-info (:pointer (:struct semaphore-create-info)))
@@ -1148,7 +1151,7 @@
 (defcstruct fence-create-info
   (stype structure-type)
   (next :pointer)
-  (flags vk-flags))
+  (flags flags))
 (defvk :device (%create-fence "vkCreateFence")
   device
   (create-info (:pointer (:struct fence-create-info)))
@@ -1192,7 +1195,7 @@
   (next :pointer)
   (wait-semaphore-count :uint32)
   (wait-semaphores (:pointer semaphore))
-  (wait-dst-stage-mask (:pointer vk-flags))
+  (wait-dst-stage-mask (:pointer flags))
   (command-buffer-count :uint32)
   (command-buffers (:pointer command-buffer))
   (signal-semaphore-count :uint32)
@@ -1326,10 +1329,10 @@
                            (mem-ref img :uint32))))
         (with-foreign-objects ((submit-info '(:struct submit-info) 1)
                                (wait-semaphores 'semaphore 1)
-                               (wait-masks 'vk-flags 1)
+                               (wait-masks 'flags 1)
                                (signal-semaphores 'semaphore 1))
           (setf (mem-aref wait-semaphores 'semaphore 0) image-available-sem)
-          (setf (mem-aref wait-masks 'vk-flags 0) #x00000001)
+          (setf (mem-aref wait-masks 'flags 0) #x00000001)
           (setf (mem-aref signal-semaphores 'semaphore 0) render-finished-sem)
           (setf (mem-aref submit-info '(:struct submit-info) 0)
                 (list 'stype :submit-info 'next (null-pointer)
