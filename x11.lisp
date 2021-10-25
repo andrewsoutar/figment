@@ -146,7 +146,7 @@
                   (:non-dispatchable :uint64)))
            (defvkfun (,(intern (format nil "DESTROY-~A" name) (symbol-package name))
                       ,(format nil "vkDestroy~A~@[~A~]" (delete #\- (string-capitalize actual-object-name)) suffix))
-               :void
+                     :void
              ,@(when param `((,param ,param)))
              (,name ,actual-object-name)
              (allocator :pointer))))
@@ -159,7 +159,7 @@
                ,@create-info-fields)
              (defvkfun (,create-name
                         ,(format nil "vkCreate~A~@[~A~]" (delete #\- (string-capitalize name)) suffix))
-                 vk-result
+                       vk-result
                ,@(when param `((,param ,param)))
                (create-info (:pointer (:struct ,create-info-name)))
                (allocator :pointer)
@@ -1324,8 +1324,8 @@
              (error "xcb_flush")))
     (loop
       (let ((image-index (with-foreign-object (img :uint32)
-                         (acquire-next-image (aref *device*) swapchain (1- (ash 1 64))
-                                             image-available-sem 0 img)
+                           (acquire-next-image (aref *device*) swapchain (1- (ash 1 64))
+                                               image-available-sem 0 img)
                            (mem-ref img :uint32))))
         (with-foreign-objects ((submit-info '(:struct submit-info) 1)
                                (wait-semaphores 'semaphore 1)
