@@ -32,11 +32,6 @@
 (use-foreign-library libvulkan)
 
 (defctype flags :uint32)
-(gen-vulkan-bindings ()
-  structure-type
-  instance-create-info
-  flags)
-
 (defctype vk-result :int)
 
 (defctype vk-dispatchable :pointer)
@@ -49,6 +44,11 @@
 (defcstruct rect-2d
   (offset (:struct offset-2d))
   (extent (:struct extent-2d)))
+
+(gen-vulkan-bindings ()
+  :special (flags)
+  :enums (structure-type)
+  :structs (instance-create-info))
 
 (defvar *instance*)
 (defvar *device*)
@@ -83,17 +83,8 @@
   (name :string))
 
 
-(defcstruct %instance-create-info
-  (stype structure-type)
-  (next :pointer)
-  (flags flags)
-  (application-info :pointer)
-  (enabled-layer-count :uint32)
-  (enabled-layers (:pointer :string))
-  (enabled-extension-count :uint32)
-  (enabled-extensions (:pointer :string)))
 (define-vulkan-global-fun (%create-instance "vkCreateInstance") vk-result
-  (create-info (:pointer (:struct %instance-create-info)))
+  (create-info (:pointer (:struct instance-create-info)))
   (allocator :pointer)
   (instance (:pointer instance)))
 (define-vulkan-instance-fun (%destroy-instance "vkDestroyInstance") :void
@@ -102,15 +93,15 @@
 (defun create-instance (layers extensions)
   (declare (type simple-vector layers extensions))
   (with-foreign-objects ((instance 'instance)
-                         (create-info '(:struct %instance-create-info))
+                         (create-info '(:struct instance-create-info))
                          (layers-arr :pointer (length layers))
                          (extensions-arr :pointer (length extensions)))
     (dotimes (i (length layers)) (setf (mem-aref layers-arr :pointer i) (null-pointer)))
     (dotimes (i (length extensions)) (setf (mem-aref extensions-arr :pointer i) (null-pointer)))
-    (setf (mem-ref create-info '(:struct %instance-create-info))
-          (list 'stype :instance-create-info 'next (null-pointer) 'flags 0 'application-info (null-pointer)
-                'enabled-layer-count (length layers) 'enabled-layers layers-arr
-                'enabled-extension-count (length extensions) 'enabled-extensions extensions-arr))
+    (setf (mem-ref create-info '(:struct instance-create-info))
+          (list :s-type :instance-create-info :next (null-pointer) :flags 0 :application-info (null-pointer)
+                :enabled-layer-count (length layers) :enabled-layer-names layers-arr
+                :enabled-extension-count (length extensions) :enabled-extension-names extensions-arr))
     (unwind-protect
          (progn
            (dotimes (i (length layers))

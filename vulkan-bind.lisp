@@ -117,40 +117,64 @@
             (unless (endp tokens) (throw 'parse-fail nil))
             (return-from parse-type-decl `(,name ,(funcall type-thunk type)))))))))
 
+(defun vulkanize-type-name (name)
+  (concatenate 'string "Vk" (delete #\- (string-capitalize name))))
+(defun vulkanize-enum-value (name)
+  (concatenate 'string "VK_" (substitute #\_ #\- (symbol-name name))))
+(defun unvulkanize-field-name (name type &aux (start 0))
+  (do () ((not (eql (car (ensure-list type)) :pointer)))
+    (assert (eql (char name start) #\p))
+    (incf start)
+    (setf type (cadr (ensure-list type))))
+  (do* ((start start end)
+        (end #1=(position-if #'upper-case-p name :start (1+ start)) #1#)
+        (temp #2=(string-upcase (subseq name start end)) (concatenate 'string temp "-" #2#)))
+       ((null end) (intern temp :keyword))))
+
 (defparameter *vulkan-file* #p"/usr/share/vulkan/registry/vk.xml")
 
-(defmacro gen-vulkan-bindings ((&optional (file *vulkan-file*)) &body names)
-  (destructuring-bind (structure-type instance-create-info flags) names
-    (let ((root (dom:document-element (cxml:parse-file file (cxml-dom:make-dom-builder)))))
-      (assert (equal (dom:tag-name root) "registry"))
-      (let ((structure-type-el (find-if (lambda (el) (and (equal (dom:tag-name el) "enums")
-                                                          (equal (get-attribute el "name") "VkStructureType")))
-                                        (child-elems root)))
-            (instance-create-info-el
-              (find-if (lambda (el) (and (equal (dom:tag-name el) "type")
-                                         (equal (get-attribute el "category") "struct")
-                                         (equal (get-attribute el "name") "VkInstanceCreateInfo")))
-                       (child-elems (find "types" (child-elems root) :key #'dom:tag-name :test #'equal)))))
-        `(progn
-           (defcenum ,structure-type
-             ,@(mapcar
-                (lambda (enum)
-                  (assert (equal (dom:tag-name enum) "enum"))
-                  (or
-                   (register-groups-bind (name) ("^VK_STRUCTURE_TYPE_(.*)$" (get-attribute enum "name"))
-                     `(,(intern (nsubstitute #\- #\_ name) :keyword) ,(parse-integer (get-attribute enum "value"))))
-                   (error "Unable to parse element ~A" enum)))
-                (child-elems structure-type-el)))
-           (defcstruct ,instance-create-info
-             ,@(mapcar
-                (lambda (member)
-                  (assert (equal (dom:tag-name member) "member"))
-                  (parse-type-decl (extract-contents member)
-                                   ;; HACK
-                                   (lambda (type)
-                                     (match-ecase type
-                                       ("VkStructureType" structure-type)
-                                       ("VkInstanceCreateFlags" flags)
-                                       ;; screw it
-                                       (t :void)))))
-                (child-elems instance-create-info-el))))))))
+(defmacro gen-vulkan-bindings ((&optional (file *vulkan-file*)) &body (&key special enums structs))
+  (let ((root (dom:document-element (cxml:parse-file file (cxml-dom:make-dom-builder)))))
+    (assert (equal (dom:tag-name root) "registry"))
+    (let ((types-elem (find "types" (child-elems root) :key #'dom:tag-name :test #'equal)))
+      `(progn
+         ,@(mapcar
+            (lambda (enum-name)
+              (let* ((type-name (vulkanize-type-name enum-name))
+                     (enums-el (find-if (lambda (el) (and (equal (dom:tag-name el) "enums")
+                                                          (equal (get-attribute el "name") type-name)))
+                                        (child-elems root))))
+                `(defcenum ,enum-name
+                   ,@(mapcar (lambda (value)
+                               (assert (equal (dom:tag-name value) "enum"))
+                               (let ((prefix (concatenate 'string (vulkanize-enum-value enum-name) "_"))
+                                     (val-name (get-attribute value "name")))
+                                 (assert (string= prefix val-name :end2 (length prefix)))
+                                 `(,(intern (nsubstitute #\- #\_ (subseq val-name (length prefix))) :keyword)
+                                   ,(parse-integer (get-attribute value "value")))))
+                             (child-elems enums-el)))))
+            enums)
+         ,@(mapcar
+            (lambda (struct-name)
+              (let* ((type-name (vulkanize-type-name struct-name))
+                     (struct-el (find-if (lambda (el) (and (equal (dom:tag-name el) "type")
+                                                           (equal (get-attribute el "category") "struct")
+                                                           (equal (get-attribute el "name") type-name)))
+                                         (child-elems types-elem))))
+                `(defcstruct ,struct-name
+                   ,@(mapcar (lambda (member)
+                               (assert (equal (dom:tag-name member) "member"))
+                               (destructuring-bind (name type)
+                                   (parse-type-decl (extract-contents member)
+                                                    ;; HACK
+                                                    (lambda (type)
+                                                      (match-ecase type
+                                                        ("VkStructureType"
+                                                         (find 'structure-type enums :test #'string=))
+                                                        ("VkInstanceCreateFlags"
+                                                         (find 'flags special :test #'string=))
+                                                        ;; screw it
+                                                        (t :void))))
+                                 `(,(unvulkanize-field-name name type) ,type)))
+                             (child-elems struct-el)))))
+            structs)))))
