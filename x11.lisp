@@ -39,17 +39,10 @@
 (defctype vk-dispatchable :pointer)
 (defctype vk-non-dispatchable :uint64)
 
-(defcstruct offset-2d (x :int32) (y :int32))
-(defcstruct offset-3d (x :int32) (y :int32) (z :int32))
-(defcstruct extent-2d (width :uint32) (height :uint32))
-(defcstruct rect-2d
-  (offset (:struct offset-2d))
-  (extent (:struct extent-2d)))
-
 (gen-vulkan-bindings ()
-  :special (flags)
-  :enums (structure-type)
-  :structs (extent-3d instance-create-info queue-family-properties))
+  (:enums structure-type)
+  (:structs offset-2d offset-3d extent-2d extent-3d rect-2d
+            instance-create-info queue-family-properties extension-properties))
 
 (defvar *instance*)
 (defvar *device*)
@@ -257,9 +250,6 @@
       (error "vkGetPhysicalDeviceSurfaceSupportKHR"))
     (= 1 (mem-ref supported :uint32))))
 
-(defcstruct extension-properties
-  (name (:array :char 256))             ;VK_MAX_EXTENSION_NAME_SIZE
-  (spec-version :uint32))
 (define-vulkan-instance-fun (enumerate-device-extension-properties
                              "vkEnumerateDeviceExtensionProperties")
                             vk-result
@@ -301,7 +291,8 @@
         (unless (every (lambda (ext)
                          (do-foreign-array (ext-ptr ext-array (:struct extension-properties) ext-count :pointerp t)
                            (when (string= ext (foreign-string-to-lisp
-                                               (foreign-slot-pointer ext-ptr '(:struct extension-properties) 'name)
+                                               (foreign-slot-pointer ext-ptr '(:struct extension-properties)
+                                                                     :extension-name)
                                                :max-chars 256))
                              (return t))))
                        #("VK_KHR_swapchain"))
@@ -465,7 +456,7 @@
           (list 'stype 1000001000 'next (null-pointer) 'flags 0
                 'surface surface 'min-image-count min-image-count
                 'image-format *image-format* 'image-color-space *image-color-space*
-                'image-extent '(width 600 height 400) 'image-array-layers 1
+                'image-extent '(:width 600 :height 400) 'image-array-layers 1
                 'image-usage #x00000010 ; VK_IMAGE_USE_COLOR_ATTACHMENT_BIT
                 'image-sharing-mode 0
                 'queue-family-index-count 0 'queue-family-indices (null-pointer)
@@ -889,7 +880,7 @@
       (setf (mem-aref viewport '(:struct viewport) 0)
             '(x 0f0 y 0f0 width 600f0 height 400f0 min-depth 0.0f0 max-depth 1.0f0))
       (setf (mem-aref scissor '(:struct rect-2d) 0)
-            '(offset (x 0 y 0) extent (width 600 height 400)))
+            '(:offset (:x 0 :y 0) :extent (:width 600 :height 400)))
       (setf (mem-ref viewport-state '(:struct pipeline-viewport-state-create-info))
             (list 'stype :pipeline-viewport-state-create-info 'next (null-pointer) 'flags 0
                   'viewport-count 1 'viewports viewport
@@ -1295,7 +1286,7 @@
           (setf (mem-ref begin-info '(:struct render-pass-begin-info))
                 (list 'stype :render-pass-begin-info 'next (null-pointer)
                       'render-pass render-pass 'framebuffer (aref framebuffers i)
-                      'render-area '(offset (x 0 y 0) extent (width 600 height 400))
+                      'render-area '(:offset (:x 0 :y 0) :extent (:width 600 :height 400))
                       'clear-value-count 1 'clear-values clear-values))
           (cmd-begin-render-pass cb begin-info 0))
         (cmd-bind-pipeline cb 0 graphics-pipeline)
