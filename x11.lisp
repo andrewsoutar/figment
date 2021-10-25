@@ -31,6 +31,8 @@
     (t (:default "libvulkan"))))
 (use-foreign-library libvulkan)
 
+(load-registry)
+
 (defctype flags :uint32)
 (defctype vk-result :int)
 
@@ -40,7 +42,6 @@
 (defcstruct offset-2d (x :int32) (y :int32))
 (defcstruct offset-3d (x :int32) (y :int32) (z :int32))
 (defcstruct extent-2d (width :uint32) (height :uint32))
-(defcstruct extent-3d (width :uint32) (height :uint32) (depth :uint32))
 (defcstruct rect-2d
   (offset (:struct offset-2d))
   (extent (:struct extent-2d)))
@@ -48,7 +49,7 @@
 (gen-vulkan-bindings ()
   :special (flags)
   :enums (structure-type)
-  :structs (instance-create-info))
+  :structs (extent-3d instance-create-info queue-family-properties))
 
 (defvar *instance*)
 (defvar *device*)
@@ -232,11 +233,6 @@
   (phys-dev-count (:pointer :uint32))
   (phys-devs (:pointer physical-device)))
 
-(defcstruct queue-family-properties
-  (queue-flags flags)
-  (queue-count :uint32)
-  (timestamp-valid-bits :uint32)
-  (min-image-transfer-granularity (:struct extent-3d)))
 (define-vulkan-instance-fun (%get-physical-device-queue-family-properties
                              "vkGetPhysicalDeviceQueueFamilyProperties")
                             :void
@@ -320,7 +316,7 @@
       (with-enumerated-objects (qf-count qf-array (:struct queue-family-properties))
           (get-physical-device-queue-family-properties physical-device)
         (do-foreign-array ((j qf-ptr) qf-array (:struct queue-family-properties) qf-count :pointerp t)
-          (when (and (logand (foreign-slot-value qf-ptr '(:struct queue-family-properties) 'queue-flags)
+          (when (and (logand (foreign-slot-value qf-ptr '(:struct queue-family-properties) :queue-flags)
                              #x00000001 ; VK_QUEUE_GRAPHICS_BIT
                              )
                      (get-physical-device-surface-support physical-device j surface))

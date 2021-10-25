@@ -3,7 +3,7 @@
   (:local-nicknames (#:m #:com.andrewsoutar.matcher/matchers))
   (:import-from #:cxml)
   (:import-from #:cxml-dom)
-  (:export #:gen-vulkan-bindings))
+  (:export #:load-registry #:gen-vulkan-bindings))
 (cl:in-package #:com.andrewsoutar.figment/vulkan-bind)
 
 (defun extract-contents (node)
@@ -72,7 +72,7 @@
             (t (error "Invalid character while tokenizing: '~C'" (char str start))))
      again)))
 
-(defun parse-type-decl (decl type-translate-fun)
+(defun parse-type-decl (decl)
   "Parse a C type declaration"
   (let ((tokens (c-tokenize decl)))
     ;; This doesn't (yet) support function pointers. It only supports
@@ -110,15 +110,17 @@
                     (values name type-thunk)))))
         (let ((type (loop (match-token-or-fail
                            ((:ident "const"))
-                           ((:ident "void") (return :void))
-                           ((:ident "uint32_t") (return :uint32))
-                           ((:ident type) (return (funcall type-translate-fun type)))))))
+                           ((:ident type) (return type))))))
           (multiple-value-bind (name type-thunk) (parse-declaration)
             (unless (endp tokens) (throw 'parse-fail nil))
             (return-from parse-type-decl `(,name ,(funcall type-thunk type)))))))))
 
 (defun vulkanize-type-name (name)
-  (concatenate 'string "Vk" (delete #\- (string-capitalize name))))
+  (do ((copy (nstring-downcase (copy-sequence 'string (string name))))
+       (pos 0 (1+ pos)))
+      ((>= pos (length copy)) (concatenate 'string "Vk" (delete #\- copy)))
+    (when (and (alpha-char-p (char copy pos)) (or (zerop pos) (not (alpha-char-p (char copy (1- pos))))))
+      (setf (char copy pos) (char-upcase (char copy pos))))))
 (defun vulkanize-enum-value (name)
   (concatenate 'string "VK_" (substitute #\_ #\- (symbol-name name))))
 (defun unvulkanize-field-name (name type &aux (start 0))
@@ -132,23 +134,66 @@
        ((null end) (intern temp :keyword))))
 
 (defparameter *vulkan-file* #p"/usr/share/vulkan/registry/vk.xml")
+(defvar *cache* (make-hash-table :test 'equal))
 
-(defmacro gen-vulkan-bindings ((&optional (file *vulkan-file*)) &body (&key special enums structs))
-  (let ((root (dom:document-element (cxml:parse-file file (cxml-dom:make-dom-builder)))))
+(defun %load-registry (&optional (file *vulkan-file*))
+  (multiple-value-bind (root truename)
+      (with-open-file (stream file :direction :input :element-type '(unsigned-byte 8))
+        (values (dom:document-element (cxml:parse-stream stream (cxml-dom:make-dom-builder)))
+                (progn (close stream) (truename stream))))
     (assert (equal (dom:tag-name root) "registry"))
-    (let ((types-elem (find "types" (child-elems root) :key #'dom:tag-name :test #'equal)))
+    (let ((type-table (make-hash-table :test 'equal))
+          (const-table (make-hash-table :test 'equal)))
+      (dolist (toplevel-child (child-elems root))
+        (match-case (dom:tag-name toplevel-child)
+          ("types"
+           (dolist (type-elem (child-elems toplevel-child))
+             (unless (or (not (equal (dom:tag-name type-elem) "type"))
+                         (member (get-attribute type-elem "category") '(nil "include" "define") :test #'equal))
+               (let ((name (or (get-attribute type-elem "name")
+                               (extract-contents (find "name" (child-elems type-elem)
+                                                       :key #'dom:tag-name :test #'equal)))))
+                 (assert (null (shiftf (first (ensure-gethash name type-table (list nil nil))) type-elem)))))))
+          ("enums"
+           (when-let (name (get-attribute toplevel-child "name"))
+             (assert (null (shiftf (second (ensure-gethash name type-table (list nil nil))) toplevel-child))))
+           (dolist (enum-elem (child-elems toplevel-child))
+             (when (equal (dom:tag-name enum-elem) "enum")
+               (let ((name (get-attribute enum-elem "name")))
+                 (assert name)
+                 (assert (null (shiftf (gethash name const-table) enum-elem)))))))))
+      (setf (gethash file *cache*)
+            (setf (gethash truename *cache*) (list type-table const-table))))
+    truename))
+(defmacro load-registry (&optional (file '*vulkan-file*))
+  `(eval-when (:compile-toplevel :execute)
+     (%load-registry ,file)))
+
+(defmacro gen-vulkan-bindings ((&optional (file *vulkan-file*)) &body (&key enums structs &allow-other-keys))
+  (destructuring-bind (type-table const-table) (gethash file *cache*)
+    (declare (ignore const-table))
+    (labels ((normalize-type (type)
+               (match-ecase type
+                 ((:pointer &rest) :pointer)
+                 ((:array inner len) `(:array ,(normalize-type inner) ,len))
+                 ("void" :void)
+                 ("uint32_t" :uint32)
+                 ((m:type string) (match-ecase (get-attribute (first (gethash type type-table)) "category")
+                                    ((m:or "enum" "bitmask")
+                                     (or (find type enums :key #'vulkanize-type-name :test #'equal) :int))
+                                    ("struct"
+                                     `(:struct ,(or (find type structs :key #'vulkanize-type-name :test #'equal)
+                                                    (error "Struct ~A does not have a name!" type)))))))))
       `(progn
          ,@(mapcar
             (lambda (enum-name)
               (let* ((type-name (vulkanize-type-name enum-name))
-                     (enums-el (find-if (lambda (el) (and (equal (dom:tag-name el) "enums")
-                                                          (equal (get-attribute el "name") type-name)))
-                                        (child-elems root))))
+                     (prefix (concatenate 'string (vulkanize-enum-value enum-name) "_"))
+                     (enums-el (second (gethash type-name type-table))))
                 `(defcenum ,enum-name
                    ,@(mapcar (lambda (value)
                                (assert (equal (dom:tag-name value) "enum"))
-                               (let ((prefix (concatenate 'string (vulkanize-enum-value enum-name) "_"))
-                                     (val-name (get-attribute value "name")))
+                               (let ((val-name (get-attribute value "name")))
                                  (assert (string= prefix val-name :end2 (length prefix)))
                                  `(,(intern (nsubstitute #\- #\_ (subseq val-name (length prefix))) :keyword)
                                    ,(parse-integer (get-attribute value "value")))))
@@ -157,24 +202,13 @@
          ,@(mapcar
             (lambda (struct-name)
               (let* ((type-name (vulkanize-type-name struct-name))
-                     (struct-el (find-if (lambda (el) (and (equal (dom:tag-name el) "type")
-                                                           (equal (get-attribute el "category") "struct")
-                                                           (equal (get-attribute el "name") type-name)))
-                                         (child-elems types-elem))))
+                     (struct-el (first (gethash type-name type-table))))
                 `(defcstruct ,struct-name
                    ,@(mapcar (lambda (member)
                                (assert (equal (dom:tag-name member) "member"))
                                (destructuring-bind (name type)
-                                   (parse-type-decl (extract-contents member)
-                                                    ;; HACK
-                                                    (lambda (type)
-                                                      (match-ecase type
-                                                        ("VkStructureType"
-                                                         (find 'structure-type enums :test #'string=))
-                                                        ("VkInstanceCreateFlags"
-                                                         (find 'flags special :test #'string=))
-                                                        ;; screw it
-                                                        (t :void))))
-                                 `(,(unvulkanize-field-name name type) ,type)))
+                                   (parse-type-decl (extract-contents member))
+                                 `(,(unvulkanize-field-name name type)
+                                   ,(normalize-type type))))
                              (child-elems struct-el)))))
             structs)))))
