@@ -42,7 +42,18 @@
 (gen-vulkan-bindings ()
   (:enums structure-type)
   (:structs offset-2d offset-3d extent-2d extent-3d rect-2d
-            instance-create-info queue-family-properties extension-properties))
+            instance-create-info queue-family-properties extension-properties
+            device-queue-create-info device-create-info
+            component-mapping image-subresource-range image-view-create-info
+            shader-module-create-info pipeline-layout-create-info
+            attachment-reference attachment-description subpass-description render-pass-create-info
+            pipeline-shader-stage-create-info pipeline-vertex-input-state-create-info
+            pipeline-input-assembly-state-create-info viewport pipeline-viewport-state-create-info
+            pipeline-rasterization-state-create-info pipeline-multisample-state-create-info
+            pipeline-color-blend-attachment-state pipeline-color-blend-state-create-info
+            graphics-pipeline-create-info framebuffer-create-info command-pool-create-info
+            command-buffer-allocate-info command-buffer-begin-info render-pass-begin-info
+            semaphore-create-info fence-create-info submit-info))
 
 (defvar *instance*)
 (defvar *device*)
@@ -318,24 +329,6 @@
 
 (defctype device vk-dispatchable)
 
-(defcstruct device-queue-create-info
-  (stype structure-type)
-  (next :pointer)
-  (flags flags)
-  (queue-family-index :uint32)
-  (queue-count :uint32)
-  (queue-priorities (:pointer :float)))
-(defcstruct device-create-info
-  (stype structure-type)
-  (next :pointer)
-  (flags flags)
-  (queue-create-info-count :uint32)
-  (queue-create-infos (:pointer (:struct device-queue-create-info)))
-  (enabled-layer-count :uint32)
-  (enabled-layer-names (:pointer :string))
-  (enabled-extension-count :uint32)
-  (enabled-extension-names (:pointer :string))
-  (enabled-features :pointer))
 (define-vulkan-instance-fun (%create-device "vkCreateDevice") vk-result
   (physical-device physical-device)
   (create-info (:pointer (:struct device-create-info)))
@@ -359,14 +352,14 @@
            (dotimes (i (length extensions))
              (setf (mem-aref extension-names :pointer i) (foreign-string-alloc (svref extensions i))))
            (setf (mem-ref device-create-info '(:struct device-create-info))
-                 (list 'stype :device-create-info 'next (null-pointer) 'flags 0
-                       'queue-create-info-count 1 'queue-create-infos queue-create-info
-                       'enabled-layer-count 0 'enabled-layer-names (null-pointer)
-                       'enabled-extension-count (length extensions) 'enabled-extension-names extension-names
-                       'enabled-features (null-pointer)))
+                 (list :s-type :device-create-info :next (null-pointer) :flags 0
+                       :queue-create-info-count 1 :queue-create-infos queue-create-info
+                       :enabled-layer-count 0 :enabled-layer-names (null-pointer)
+                       :enabled-extension-count (length extensions) :enabled-extension-names extension-names
+                       :enabled-features (null-pointer)))
            (setf (mem-ref queue-create-info '(:struct device-queue-create-info))
-                 (list 'stype :device-queue-create-info 'next (null-pointer) 'flags 0
-                       'queue-family-index queue 'queue-count 1 'queue-priorities priorities))
+                 (list :s-type :device-queue-create-info :next (null-pointer) :flags 0
+                       :queue-family-index queue :queue-count 1 :queue-priorities priorities))
            (setf (mem-aref priorities :float 0) queue-priority)
            (unless (zerop (%create-device physical-device device-create-info (null-pointer) device))
              (error "vkCreateDevice"))
@@ -478,23 +471,6 @@
 
 (defctype image-view vk-non-dispatchable)
 
-(defcstruct component-mapping (r :int) (g :int) (b :int) (a :int))
-(defcstruct image-subresource-range
-  (aspect-mask flags)
-  (base-mip-level :uint32)
-  (level-count :uint32)
-  (base-array-layer :uint32)
-  (layer-count :uint32))
-(defcstruct image-view-create-info
-  (stype structure-type)
-  (next :pointer)
-  (flags flags)
-  (image image)
-  (view-type :int)
-  (format :int)
-  (components (:struct component-mapping))
-  (subresource-range (:struct image-subresource-range)))
-
 (define-vulkan-device-fun (%create-image-view "vkCreateImageView") vk-result
   (device device)
   (create-info (:pointer (:struct image-view-create-info)))
@@ -504,12 +480,12 @@
   (with-foreign-objects ((view 'image-view)
                          (create-info '(:struct image-view-create-info)))
     (setf (mem-ref create-info '(:struct image-view-create-info))
-          (list 'stype :image-view-create-info 'next (null-pointer) 'flags 0
-                'image image 'view-type 1 ; VK_IMAGE_VIEW_TYPE_2D
-                'format *image-format*
-                'components '(r 0 b 0 g 0 a 0)
-                'subresource-range '(aspect-mask #x00000001 base-mip-level 0 level-count 1
-                                     base-array-layer 0 layer-count 1)))
+          (list :s-type :image-view-create-info :next (null-pointer) :flags 0
+                :image image :view-type 1 ; VK_IMAGE_VIEW_TYPE_2D
+                :format *image-format*
+                :components '(:r 0 :b 0 :g 0 :a 0)
+                :subresource-range '(:aspect-mask #x00000001 :base-mip-level 0 :level-count 1
+                                     :base-array-layer 0 :layer-count 1)))
     (unless (zerop (%create-image-view (aref *device*) create-info (null-pointer) view))
       (error "vkCreateImageView"))
     (mem-ref view 'image-view)))
@@ -589,12 +565,6 @@
 
 (defctype shader-module vk-non-dispatchable)
 
-(defcstruct shader-module-create-info
-  (stype structure-type)
-  (next :pointer)
-  (flags flags)
-  (code-size :size)
-  (code (:pointer :uint32)))
 (define-vulkan-device-fun (%create-shader-module "vkCreateShaderModule") vk-result
   (device device)
   (create-info (:pointer (:struct shader-module-create-info)))
@@ -605,8 +575,8 @@
                          (create-info '(:struct shader-module-create-info)))
     (with-pointer-to-vector-data (code-ptr code)
       (setf (mem-ref create-info '(:struct shader-module-create-info))
-            (list 'stype :shader-module-create-info 'next (null-pointer) 'flags 0
-                  'code-size (length code) 'code code-ptr))
+            (list :s-type :shader-module-create-info :next (null-pointer) :flags 0
+                  :code-size (length code) :code code-ptr))
       (unless (zerop (%create-shader-module (aref *device*) create-info (null-pointer) shader-module))
         (error "vkCreateShaderModule"))
       (mem-ref shader-module 'shader-module))))
@@ -621,14 +591,6 @@
 
 (defctype pipeline-layout vk-non-dispatchable)
 
-(defcstruct pipeline-layout-create-info
-  (stype structure-type)
-  (next :pointer)
-  (flags flags)
-  (set-layout-count :uint32)
-  (set-layouts :pointer)
-  (push-constant-range-count :uint32)
-  (push-constant-ranges :pointer))
 (define-vulkan-device-fun (%create-pipeline-layout "vkCreatePipelineLayout") vk-result
   (device device)
   (create-info (:pointer (:struct pipeline-layout-create-info)))
@@ -638,9 +600,9 @@
   (with-foreign-objects ((layout 'pipeline-layout)
                          (create-info '(:struct pipeline-layout-create-info)))
     (setf (mem-ref create-info '(:struct pipeline-layout-create-info))
-          (list 'stype :pipeline-layout-create-info 'next (null-pointer) 'flags 0
-                'set-layout-count 0 'set-layouts (null-pointer)
-                'push-constant-range-count 0 'push-constant-ranges (null-pointer)))
+          (list :s-type :pipeline-layout-create-info :next (null-pointer) :flags 0
+                :set-layout-count 0 :set-layouts (null-pointer)
+                :push-constant-range-count 0 :push-constant-ranges (null-pointer)))
     (unless (zerop (%create-pipeline-layout (aref *device*) create-info (null-pointer) layout))
       (error "vkCreatePipelineLayout"))
     (mem-ref layout 'pipeline-layout)))
@@ -655,40 +617,6 @@
 
 (defctype render-pass vk-non-dispatchable)
 
-(defcstruct attachment-reference
-  (attachment :uint32)
-  (layout :int))
-(defcstruct attachment-description
-  (flags flags)
-  (format :int)
-  (samples :int)
-  (load-op :int)
-  (store-op :int)
-  (stencil-load-op :int)
-  (stencil-store-op :int)
-  (initial-layout :int)
-  (final-layout :int))
-(defcstruct subpass-description
-  (flags flags)
-  (pipeline-bind-point :int)
-  (input-attachment-count :uint32)
-  (input-attachments (:pointer (:struct attachment-reference)))
-  (color-attachment-count :uint32)
-  (color-attachments (:pointer (:struct attachment-reference)))
-  (resolve-attachments (:pointer (:struct attachment-reference)))
-  (depth-stencil-attachments (:pointer (:struct attachment-reference)))
-  (preserve-attachment-count :uint32)
-  (preserve-attachments (:pointer :uint32)))
-(defcstruct render-pass-create-info
-  (stype structure-type)
-  (next :pointer)
-  (flags flags)
-  (attachment-count :uint32)
-  (attachments (:pointer (:struct attachment-description)))
-  (subpass-count :uint32)
-  (subpasses :pointer)
-  (dependency-count :uint32)
-  (dependencies :pointer))
 (define-vulkan-device-fun (%create-render-pass "vkCreateRenderPass") vk-result
   (device device)
   (create-info (:pointer (:struct render-pass-create-info)))
@@ -705,10 +633,10 @@
       (setf (mem-aref attachments-ptr '(:struct attachment-description) i) (aref attachments i)))
     (setf (mem-ref subpass-ptr '(:struct subpass-description)) subpass)
     (setf (mem-ref create-info '(:struct render-pass-create-info))
-          (list 'stype :render-pass-create-info 'next (null-pointer) 'flags 0
-                'attachment-count (length attachments) 'attachments attachments-ptr
-                'subpass-count 1 'subpasses subpass-ptr
-                'dependency-count 0 'dependencies (null-pointer)))
+          (list :s-type :render-pass-create-info :next (null-pointer) :flags 0
+                :attachment-count (length attachments) :attachments attachments-ptr
+                :subpass-count 1 :subpasses subpass-ptr
+                :dependency-count 0 :dependencies (null-pointer)))
     (unless (zerop (%create-render-pass (aref *device*) create-info (null-pointer) render-pass))
       (error "vkCreateRenderPass"))
     (mem-ref render-pass 'render-pass)))
@@ -728,110 +656,6 @@
   (allocator :pointer))
 (defun destroy-pipeline (pipeline)
   (%destroy-pipeline (aref *device*) pipeline (null-pointer)))
-
-(defcstruct pipeline-shader-stage-create-info
-  (stype structure-type)
-  (next :pointer)
-  (flags flags)
-  (stage :int)
-  (module shader-module)
-  (name :string)
-  (specialization-info :pointer))
-
-(defcstruct pipeline-vertex-input-state-create-info
-  (stype structure-type)
-  (next :pointer)
-  (flags flags)
-  (vertex-binding-description-count :uint32)
-  (vertex-binding-descriptions :pointer)
-  (vertex-attribute-description-count :uint32)
-  (vertex-attribute-descriptions :pointer))
-
-(defcstruct pipeline-input-assembly-state-create-info
-  (stype structure-type)
-  (next :pointer)
-  (flags flags)
-  (topology :int)
-  (primitive-restart-enable :uint32))
-
-(defcstruct viewport
-  (x :float) (y :float)
-  (width :float) (height :float)
-  (min-depth :float) (max-depth :float))
-(defcstruct pipeline-viewport-state-create-info
-  (stype structure-type)
-  (next :pointer)
-  (flags flags)
-  (viewport-count :uint32)
-  (viewports (:pointer (:struct viewport)))
-  (scissor-count :uint32)
-  (scissors (:pointer (:struct rect-2d))))
-
-(defcstruct pipeline-rasterization-state-create-info
-  (stype structure-type)
-  (next :pointer)
-  (flags flags)
-  (depth-clamp-enable :uint32)
-  (rasterizer-discard-enable :uint32)
-  (polygon-mode :int)
-  (cull-mode flags)
-  (front-face :int)
-  (depth-bias-enable :uint32)
-  (depth-bias-constant-factor :float)
-  (depth-bias-clamp :float)
-  (depth-bias-slope-factor :float)
-  (line-width :float))
-
-(defcstruct pipeline-multisample-state-create-info
-  (stype structure-type)
-  (next :pointer)
-  (flags flags)
-  (rasterization-samples :int)
-  (sample-shading-enable :uint32)
-  (min-sample-shading :float)
-  (sample-mask :pointer)
-  (alpha-to-converge-enable :uint32)
-  (alpha-to-one-enable :uint32))
-
-(defcstruct pipeline-color-blend-attachment-state
-  (blend-enable :uint32)
-  (src-color-blend-factor :int)
-  (dst-color-blend-factor :int)
-  (color-blend-op :int)
-  (src-alpha-blend-factor :int)
-  (dst-alpha-blend-factor :int)
-  (alpha-blend-op :int)
-  (color-write-mask flags))
-(defcstruct pipeline-color-blend-state-create-info
-  (stype structure-type)
-  (next :pointer)
-  (flags flags)
-  (logic-op-enable :uint32)
-  (logic-op :int)
-  (attachment-count :uint32)
-  (attachments :pointer)
-  (blend-constants (:array :float 4)))
-
-(defcstruct graphics-pipeline-create-info
-  (stype structure-type)
-  (next :pointer)
-  (flags flags)
-  (stage-count :uint32)
-  (stages (:pointer (:struct pipeline-shader-stage-create-info)))
-  (vertex-input-state (:pointer (:struct pipeline-vertex-input-state-create-info)))
-  (input-assembly-state (:pointer (:struct pipeline-input-assembly-state-create-info)))
-  (tessellation-state (:pointer #+nil (:struct pipeline-tessellation-state-create-info)))
-  (viewport-state (:pointer (:struct pipeline-viewport-state-create-info)))
-  (rasterization-state (:pointer (:struct pipeline-rasterization-state-create-info)))
-  (multisample-state (:pointer (:struct pipeline-multisample-state-create-info)))
-  (depth-stencil-state (:pointer #+nil (:struct pipeline-depth-stencil-state-create-info)))
-  (color-blend-state (:pointer (:struct pipeline-color-blend-state-create-info)))
-  (dynamic-state (:pointer #+nil (:struct pipeline-dynamic-state-create-info)))
-  (layout pipeline-layout)
-  (render-pass render-pass)
-  (subpass :uint32)
-  (base-pipeline-handle pipeline)
-  (base-pipeline-index :uint32))
 
 (define-vulkan-device-fun (%create-graphics-pipelines "vkCreateGraphicsPipelines") vk-result
   (device device)
@@ -856,73 +680,95 @@
                          (color-blend-state '(:struct pipeline-color-blend-state-create-info)))
     (with-foreign-string (str-main "main")
       (setf (mem-aref stages-info '(:struct pipeline-shader-stage-create-info) 0)
-            (list 'stype :pipeline-shader-stage-create-info 'next (null-pointer) 'flags 0
-                  'stage #x00000001     ; VK_SHADER_STAGE_VERTEX_BIT
-                  'module vertex-module 'name str-main
-                  'specialization-info (null-pointer)))
+            (list :s-type :pipeline-shader-stage-create-info :next (null-pointer) :flags 0
+                  :stage #x00000001     ; VK_SHADER_STAGE_VERTEX_BIT
+                  :module vertex-module :name str-main
+                  :specialization-info (null-pointer)))
       (setf (mem-aref stages-info '(:struct pipeline-shader-stage-create-info) 1)
-            (list 'stype :pipeline-shader-stage-create-info 'next (null-pointer) 'flags 0
-                  'stage #x00000010     ; VK_SHADER_STAGE_FRAGMENT_BIT
-                  'module fragment-module 'name str-main
-                  'specialization-info (null-pointer)))
+            (list :s-type :pipeline-shader-stage-create-info :next (null-pointer) :flags 0
+                  :stage #x00000010     ; VK_SHADER_STAGE_FRAGMENT_BIT
+                  :module fragment-module :name str-main
+                  :specialization-info (null-pointer)))
 
       (setf (mem-ref vertex-input-state '(:struct pipeline-vertex-input-state-create-info))
-            (list 'stype :pipeline-vertex-input-state-create-info 'next (null-pointer) 'flags 0
-                  'vertex-binding-description-count 0
-                  'vertex-binding-descriptions (null-pointer)
-                  'vertex-attribute-description-count 0
-                  'vertex-attribute-descriptions (null-pointer)))
+            (list :s-type :pipeline-vertex-input-state-create-info :next (null-pointer) :flags 0
+                  :vertex-binding-description-count 0
+                  :vertex-binding-descriptions (null-pointer)
+                  :vertex-attribute-description-count 0
+                  :vertex-attribute-descriptions (null-pointer)))
       (setf (mem-ref input-assembly-state '(:struct pipeline-input-assembly-state-create-info))
-            (list 'stype :pipeline-input-assembly-state-create-info 'next (null-pointer) 'flags 0
-                  'topology 3    ; VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
-                  'primitive-restart-enable 0))
+            (list :s-type :pipeline-input-assembly-state-create-info :next (null-pointer) :flags 0
+                  :topology 3))  ; VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+      (setf (foreign-slot-value input-assembly-state '(:struct pipeline-input-assembly-state-create-info)
+                                :primitive-restart-enable)
+            nil)
 
       (setf (mem-aref viewport '(:struct viewport) 0)
-            '(x 0f0 y 0f0 width 600f0 height 400f0 min-depth 0.0f0 max-depth 1.0f0))
+            '(:x 0f0 :y 0f0 :width 600f0 :height 400f0 :min-depth 0.0f0 :max-depth 1.0f0))
       (setf (mem-aref scissor '(:struct rect-2d) 0)
             '(:offset (:x 0 :y 0) :extent (:width 600 :height 400)))
       (setf (mem-ref viewport-state '(:struct pipeline-viewport-state-create-info))
-            (list 'stype :pipeline-viewport-state-create-info 'next (null-pointer) 'flags 0
-                  'viewport-count 1 'viewports viewport
-                  'scissor-count 1 'scissors scissor))
+            (list :s-type :pipeline-viewport-state-create-info :next (null-pointer) :flags 0
+                  :viewport-count 1 :viewports viewport
+                  :scissor-count 1 :scissors scissor))
 
       (setf (mem-ref rasterization-state '(:struct pipeline-rasterization-state-create-info))
-            (list 'stype :pipeline-rasterization-state-create-info 'next (null-pointer) 'flags 0
-                  'depth-clamp-enable 0 'rasterizer-discard-enable 0
-                  'polygon-mode 0    ; VK_POLYGON_MODE_FILL
-                  'cull-mode 0       ; VK_CULL_MODE_NONE
-                  'front-face 0      ; VK_FRONT_FACE_COUNTER_CLOCKWISE
-                  'depth-bias-enable 0 'depth-bias-constant-factor 0.0f0
-                  'depth-bias-clamp 0.0f0 'depth-bias-slope-factor 0.0f0
-                  'line-width 1.0f0))
+            (list :s-type :pipeline-rasterization-state-create-info :next (null-pointer) :flags 0
+                  :polygon-mode 0    ; VK_POLYGON_MODE_FILL
+                  :cull-mode 0       ; VK_CULL_MODE_NONE
+                  :front-face 0      ; VK_FRONT_FACE_COUNTER_CLOCKWISE
+                  :depth-bias-constant-factor 0.0f0
+                  :depth-bias-clamp 0.0f0 :depth-bias-slope-factor 0.0f0
+                  :line-width 1.0f0))
+      (setf (foreign-slot-value rasterization-state '(:struct pipeline-rasterization-state-create-info)
+                                :depth-clamp-enable)
+            nil)
+      (setf (foreign-slot-value rasterization-state '(:struct pipeline-rasterization-state-create-info)
+                                :rasterizer-discard-enable)
+            nil)
+      (setf (foreign-slot-value rasterization-state '(:struct pipeline-rasterization-state-create-info)
+                                :depth-bias-enable)
+            nil)
 
       (setf (mem-ref multisample-state '(:struct pipeline-multisample-state-create-info))
-            (list 'stype :pipeline-multisample-state-create-info 'next (null-pointer) 'flags 0
-                  'rasterization-samples #x00000001 ; VK_SAMPLE_COUNT_1_BIT
-                  'sample-shading-enable 0 'min-sample-shading 1.0f0
-                  'sample-mask (null-pointer)
-                  'alpha-to-converge-enable 0 'alpha-to-one-enable 0))
+            (list :s-type :pipeline-multisample-state-create-info :next (null-pointer) :flags 0
+                  :rasterization-samples #x00000001 ; VK_SAMPLE_COUNT_1_BIT
+                  :min-sample-shading 1.0f0
+                  :sample-mask (null-pointer)
+                  :alpha-to-coverage-enable nil :alpha-to-one-enable nil))
+      (setf (foreign-slot-value multisample-state '(:struct pipeline-multisample-state-create-info)
+                                :sample-shading-enable)
+            nil)
+      (setf (foreign-slot-value multisample-state '(:struct pipeline-multisample-state-create-info)
+                                :alpha-to-coverage-enable)
+            nil)
+      (setf (foreign-slot-value multisample-state '(:struct pipeline-multisample-state-create-info)
+                                :alpha-to-one-enable)
+            nil)
 
       (setf (mem-aref attachments '(:struct pipeline-color-blend-attachment-state) 0)
-            '(blend-enable 0 src-color-blend-factor 1 dst-color-blend-factor 0 color-blend-op 0
-              src-alpha-blend-factor 1 dst-alpha-blend-factor 0 alpha-blend-op 0 color-write-mask 15))
+            '(:src-color-blend-factor 1 :dst-color-blend-factor 0 :color-blend-op 0
+              :src-alpha-blend-factor 1 :dst-alpha-blend-factor 0 :alpha-blend-op 0 :color-write-mask 15))
+      (setf (foreign-slot-value attachments '(:struct pipeline-color-blend-attachment-state) :blend-enable) nil)
       (setf (mem-ref color-blend-state '(:struct pipeline-color-blend-state-create-info))
-            (list 'stype :pipeline-color-blend-state-create-info 'next (null-pointer) 'flags 0
-                  'logic-op-enable 0 'logic-op 0
-                  'attachment-count 1 'attachments attachments))
-      (setf (foreign-slot-value color-blend-state '(:struct pipeline-color-blend-state-create-info) 'blend-constants)
+            (list :s-type :pipeline-color-blend-state-create-info :next (null-pointer) :flags 0
+                  :logic-op-enable nil :logic-op 0
+                  :attachment-count 1 :attachments attachments))
+      (setf (foreign-slot-value color-blend-state '(:struct pipeline-color-blend-state-create-info) :logic-op-enable)
+            nil)
+      (setf (foreign-slot-value color-blend-state '(:struct pipeline-color-blend-state-create-info) :blend-constants)
             #(0.0f0 0.0f0 0.0f0 0.0f0))
 
       (setf (mem-ref create-info '(:struct graphics-pipeline-create-info))
-            (list* 'stype :graphics-pipeline-create-info 'next (null-pointer) 'flags 0
-                   'stage-count 2 'stages stages-info
-                   'tessellation-state (null-pointer)
-                   'depth-stencil-state (null-pointer)
-                   'dynamic-state (null-pointer)
-                   'layout layout
-                   'render-pass render-pass 'subpass 0
-                   'base-pipeline-handle 0 'base-pipeline-index #xffffffff
-                   #.(cons 'list (mapcan (lambda (x) `(',x ,x))
+            (list* :s-type :graphics-pipeline-create-info :next (null-pointer) :flags 0
+                   :stage-count 2 :stages stages-info
+                   :tessellation-state (null-pointer)
+                   :depth-stencil-state (null-pointer)
+                   :dynamic-state (null-pointer)
+                   :layout layout
+                   :render-pass render-pass :subpass 0
+                   :base-pipeline-handle 0 :base-pipeline-index -1
+                   #.(cons 'list (mapcan (lambda (x) `(,(intern (symbol-name x) :keyword) ,x))
                                          '(vertex-input-state input-assembly-state viewport-state
                                            rasterization-state multisample-state color-blend-state)))))
 
@@ -933,16 +779,6 @@
 
 (defctype framebuffer vk-non-dispatchable)
 
-(defcstruct framebuffer-create-info
-  (stype structure-type)
-  (next :pointer)
-  (flags flags)
-  (render-pass render-pass)
-  (attachment-count :uint32)
-  (attachments (:pointer image-view))
-  (width :uint32)
-  (height :uint32)
-  (layers :uint32))
 (define-vulkan-device-fun (%create-framebuffer "vkCreateFramebuffer") vk-result
   (device device)
   (create-info (:pointer (:struct framebuffer-create-info)))
@@ -954,10 +790,10 @@
                          (attachment 'image-view 1))
     (setf (mem-ref attachment 'image-view) image-view)
     (setf (mem-ref create-info '(:struct framebuffer-create-info))
-          (list 'stype :framebuffer-create-info 'next (null-pointer) 'flags 0
-                'render-pass render-pass
-                'attachment-count 1 'attachments attachment
-                'width 600 'height 400 'layers 1))
+          (list :s-type :framebuffer-create-info :next (null-pointer) :flags 0
+                :render-pass render-pass
+                :attachment-count 1 :attachments attachment
+                :width 600 :height 400 :layers 1))
     (unless (zerop (%create-framebuffer (aref *device*) create-info (null-pointer) framebuffer))
       (error "vkCreateFramebuffer"))
     (mem-ref framebuffer 'framebuffer)))
@@ -972,11 +808,6 @@
 
 (defctype command-pool vk-non-dispatchable)
 
-(defcstruct command-pool-create-info
-  (stype structure-type)
-  (next :pointer)
-  (flags flags)
-  (queue-family-index :uint32))
 (define-vulkan-device-fun (%create-command-pool "vkCreateCommandPool") vk-result
   (device device)
   (create-info (:pointer (:struct command-pool-create-info)))
@@ -986,8 +817,8 @@
   (with-foreign-objects ((command-pool 'command-pool)
                          (create-info '(:struct command-pool-create-info)))
     (setf (mem-ref create-info '(:struct command-pool-create-info))
-          (list 'stype :command-pool-create-info 'next (null-pointer) 'flags 0
-                'queue-family-index queue-family-index))
+          (list :s-type :command-pool-create-info :next (null-pointer) :flags 0
+                :queue-family-index queue-family-index))
     (unless (zerop (%create-command-pool (aref *device*) create-info (null-pointer) command-pool))
       (error "vkCreateCommandPool"))
     (mem-ref command-pool 'command-pool)))
@@ -1002,12 +833,6 @@
 
 (defctype command-buffer vk-dispatchable)
 
-(defcstruct command-buffer-allocate-info
-  (stype structure-type)
-  (next :pointer)
-  (command-pool command-pool)
-  (level :int)
-  (command-buffer-count :uint32))
 (define-vulkan-device-fun (%allocate-command-buffers "vkAllocateCommandBuffers") vk-result
   (device device)
   (allocate-info (:pointer (:struct command-buffer-allocate-info)))
@@ -1015,8 +840,8 @@
 (defun allocate-command-buffers (command-buffers n-command-buffers command-pool)
   (with-foreign-object (allocate-info '(:struct command-buffer-allocate-info))
     (setf (mem-ref allocate-info '(:struct command-buffer-allocate-info))
-          (list 'stype :command-buffer-allocate-info 'next (null-pointer)
-                'command-pool command-pool 'level 0 'command-buffer-count n-command-buffers))
+          (list :s-type :command-buffer-allocate-info :next (null-pointer)
+                :command-pool command-pool :level 0 :command-buffer-count n-command-buffers))
     (unless (zerop (%allocate-command-buffers (aref *device*) allocate-info command-buffers))
       (error "vkAllocateCommandBuffers"))))
 
@@ -1041,18 +866,13 @@
               (unless (zerop (,%name ,@(mapcar #'first lambda-list)))
                 (error "~A" ',vk-name))))))
 
-(defcstruct command-buffer-begin-info
-  (stype structure-type)
-  (next :pointer)
-  (flags flags)
-  (inheritance-info :pointer))
 (defvk :device (%begin-command-buffer "vkBeginCommandBuffer")
   command-buffer
   (begin-info (:pointer (:struct command-buffer-begin-info))))
 (defun begin-command-buffer (command-buffer)
   (with-foreign-object (begin-info '(:struct command-buffer-begin-info))
     (setf (mem-ref begin-info '(:struct command-buffer-begin-info))
-          (list 'stype :command-buffer-begin-info 'next (null-pointer) 'flags 0 'inheritance-info (null-pointer)))
+          (list :s-type :command-buffer-begin-info :next (null-pointer) :flags 0 :inheritance-info (null-pointer)))
     (%begin-command-buffer command-buffer begin-info)))
 
 (defvk :device (end-command-buffer "vkEndCommandBuffer")
@@ -1068,14 +888,7 @@
 (defcunion clear-value
   (color (:union clear-color-value))
   (depth-stencil (:union clear-depth-stencil-value)))
-(defcstruct render-pass-begin-info
-  (stype structure-type)
-  (next :pointer)
-  (render-pass render-pass)
-  (framebuffer framebuffer)
-  (render-area (:struct rect-2d))
-  (clear-value-count :uint32)
-  (clear-values (:pointer (:union clear-value))))
+
 (define-vulkan-device-fun (cmd-begin-render-pass "vkCmdBeginRenderPass") :void
   (command-buffer command-buffer)
   (render-pass-begin (:pointer (:struct render-pass-begin-info)))
@@ -1099,10 +912,6 @@
 
 (defctype semaphore vk-non-dispatchable)
 
-(defcstruct semaphore-create-info
-  (stype structure-type)
-  (next :pointer)
-  (flags flags))
 (defvk :device (%create-semaphore "vkCreateSemaphore")
   device
   (create-info (:pointer (:struct semaphore-create-info)))
@@ -1112,7 +921,7 @@
   (with-foreign-objects ((semaphore 'semaphore)
                          (create-info '(:struct semaphore-create-info)))
     (setf (mem-ref create-info '(:struct semaphore-create-info))
-          (list 'stype :semaphore-create-info 'next (null-pointer) 'flags 0))
+          (list :s-type :semaphore-create-info :next (null-pointer) :flags 0))
     (%create-semaphore (aref *device*) create-info (null-pointer) semaphore)
     (mem-ref semaphore 'semaphore)))
 
@@ -1126,10 +935,6 @@
 
 (defctype fence vk-non-dispatchable)
 
-(defcstruct fence-create-info
-  (stype structure-type)
-  (next :pointer)
-  (flags flags))
 (defvk :device (%create-fence "vkCreateFence")
   device
   (create-info (:pointer (:struct fence-create-info)))
@@ -1139,7 +944,7 @@
   (with-foreign-objects ((fence 'fence)
                          (create-info '(:struct fence-create-info)))
     (setf (mem-ref create-info '(:struct fence-create-info))
-          (list 'stype :fence-create-info 'next (null-pointer) 'flags 0))
+          (list :s-type :fence-create-info :next (null-pointer) :flags 0))
     (%create-fence (aref *device*) create-info (null-pointer) fence)
     (mem-ref fence 'fence)))
 
@@ -1168,16 +973,6 @@
   (image-index (:pointer :uint32)))
 
 
-(defcstruct submit-info
-  (stype structure-type)
-  (next :pointer)
-  (wait-semaphore-count :uint32)
-  (wait-semaphores (:pointer semaphore))
-  (wait-dst-stage-mask (:pointer flags))
-  (command-buffer-count :uint32)
-  (command-buffers (:pointer command-buffer))
-  (signal-semaphore-count :uint32)
-  (signal-semaphores (:pointer semaphore)))
 (defvk :device (queue-submit "vkQueueSubmit")
   queue
   (submit-count :uint32)
@@ -1252,17 +1047,17 @@
                     (pipeline-layout (create-pipeline-layout) #'destroy-pipeline-layout)
                     (render-pass (with-foreign-object (attach-ref '(:struct attachment-reference))
                                    (setf (mem-ref attach-ref '(:struct attachment-reference))
-                                         '(attachment 0 layout 2))
+                                         '(:attachment 0 :layout 2))
                                    (create-render-pass
-                                    (vector (list 'flags 0 'format *image-format* 'samples #x00000001
-                                                  'load-op 1 'store-op 0 'stencil-load-op 2 'stencil-store-op 1
-                                                  'initial-layout 0 'final-layout 1000001002))
-                                    (list 'flags 0 'pipeline-bind-point 0
-                                          'input-attachment-count 0 'input-attachments (null-pointer)
-                                          'color-attachment-count 1 'color-attachments attach-ref
-                                          'resolve-attachments (null-pointer)
-                                          'depth-stencil-attachments (null-pointer)
-                                          'preserve-attachment-count 0 'preserve-attachments (null-pointer))))
+                                    (vector (list :flags 0 :format *image-format* :samples #x00000001
+                                                  :load-op 1 :store-op 0 :stencil-load-op 2 :stencil-store-op 1
+                                                  :initial-layout 0 :final-layout 1000001002))
+                                    (list :flags 0 :pipeline-bind-point 0
+                                          :input-attachment-count 0 :input-attachments (null-pointer)
+                                          :color-attachment-count 1 :color-attachments attach-ref
+                                          :resolve-attachments (null-pointer)
+                                          :depth-stencil-attachment (null-pointer)
+                                          :preserve-attachment-count 0 :preserve-attachments (null-pointer))))
                                  #'destroy-render-pass)
                     (graphics-pipeline (create-graphics-pipeline vert-shader-mod frag-shader-mod
                                                                  pipeline-layout render-pass)
@@ -1284,10 +1079,10 @@
                                     '(:union clear-color-value) 'float32)
                 #(1.0f0 1.0f0 1.0f0 1.0f0))
           (setf (mem-ref begin-info '(:struct render-pass-begin-info))
-                (list 'stype :render-pass-begin-info 'next (null-pointer)
-                      'render-pass render-pass 'framebuffer (aref framebuffers i)
-                      'render-area '(:offset (:x 0 :y 0) :extent (:width 600 :height 400))
-                      'clear-value-count 1 'clear-values clear-values))
+                (list :s-type :render-pass-begin-info :next (null-pointer)
+                      :render-pass render-pass :framebuffer (aref framebuffers i)
+                      :render-area '(:offset (:x 0 :y 0) :extent (:width 600 :height 400))
+                      :clear-value-count 1 :clear-values clear-values))
           (cmd-begin-render-pass cb begin-info 0))
         (cmd-bind-pipeline cb 0 graphics-pipeline)
         (cmd-draw cb 3 1 0 0)
@@ -1313,10 +1108,10 @@
           (setf (mem-aref wait-masks 'flags 0) #x00000001)
           (setf (mem-aref signal-semaphores 'semaphore 0) render-finished-sem)
           (setf (mem-aref submit-info '(:struct submit-info) 0)
-                (list 'stype :submit-info 'next (null-pointer)
-                      'wait-semaphore-count 1 'wait-semaphores wait-semaphores 'wait-dst-stage-mask wait-masks
-                      'command-buffer-count 1 'command-buffers (mem-aptr cmd-bufs 'command-buffer image-index)
-                      'signal-semaphore-count 1 'signal-semaphores signal-semaphores))
+                (list :s-type :submit-info :next (null-pointer)
+                      :wait-semaphore-count 1 :wait-semaphores wait-semaphores :wait-dst-stage-mask wait-masks
+                      :command-buffer-count 1 :command-buffers (mem-aptr cmd-bufs 'command-buffer image-index)
+                      :signal-semaphore-count 1 :signal-semaphores signal-semaphores))
           (queue-submit queue 1 submit-info fence))
         (with-foreign-objects ((present-info '(:struct present-info))
                                (wait-semaphores 'semaphore 1)

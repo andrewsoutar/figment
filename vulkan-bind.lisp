@@ -192,14 +192,23 @@
                    ((:array inner len) `(:array ,(normalize-type inner) ,(eval-c-expr len const-table)))
                    ("void" :void)
                    ("char" :char)
+                   ("float" :float)
                    ("int32_t" :int32)
                    ("uint32_t" :uint32)
-                   ((m:type string) (match-ecase (get-attribute (first (gethash type type-table)) "category")
-                                      ((m:or "enum" "bitmask")
-                                       (or (find type enums :key #'vulkanize-type-name :test #'equal) :int))
-                                      ("struct"
-                                       `(:struct ,(or (find type structs :key #'vulkanize-type-name :test #'equal)
-                                                      (error "Struct ~A does not have a name!" type)))))))))
+                   ("size_t" :size)
+                   ("VkBool32" `(:boolean :uint32))
+                   ((m:type string) (let ((elem (first (gethash type type-table))))
+                                      (match-ecase (get-attribute elem "category")
+                                        ((m:or "enum" "bitmask")
+                                         (or (find type enums :key #'vulkanize-type-name :test #'equal) :int))
+                                        ("struct"
+                                         `(:struct ,(or (find type structs :key #'vulkanize-type-name :test #'equal)
+                                                        (error "Struct ~A does not have a name!" type))))
+                                        ("handle"
+                                         (match-ecase (extract-contents elem)
+                                           ((m:equal (format nil "VK_DEFINE_HANDLE(~A)" type)) :pointer)
+                                           ((m:equal (format nil "VK_DEFINE_NON_DISPATCHABLE_HANDLE(~A)" type))
+                                            :uint64)))))))))
         `(progn
            ,@(mapcar
               (lambda (enum-name)
