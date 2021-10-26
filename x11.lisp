@@ -50,7 +50,21 @@
             graphics-pipeline-create-info framebuffer-create-info command-pool-create-info
             command-buffer-allocate-info command-buffer-begin-info render-pass-begin-info
             semaphore-create-info fence-create-info submit-info)
-  (:functions enumerate-physical-devices))
+  (:functions %create-instance %destroy-instance
+              enumerate-physical-devices
+              %get-physical-device-queue-family-properties
+              enumerate-device-extension-properties
+              %create-device %destroy-device %get-device-queue
+              %create-image-view %destroy-image-view
+              %create-shader-module %destroy-shader-module
+              %create-pipeline-layout %destroy-pipeline-layout
+              %create-render-pass %destroy-render-pass
+              %destroy-pipeline %create-graphics-pipelines
+              %create-framebuffer %destroy-framebuffer
+              %create-command-pool %destroy-command-pool
+              %allocate-command-buffers %free-command-buffers
+              cmd-begin-render-pass cmd-bind-pipeline cmd-draw cmd-end-render-pass
+              %destroy-semaphore %destroy-fence))
 
 (defvar *instance*)
 (defvar *device*)
@@ -78,13 +92,6 @@
 
 (defctype device vk-dispatchable)
 
-(define-vulkan-global-fun (%create-instance "vkCreateInstance") vk-result
-  (create-info (:pointer (:struct instance-create-info)))
-  (allocator :pointer)
-  (instance (:pointer instance)))
-(define-vulkan-instance-fun (%destroy-instance "vkDestroyInstance") :void
-  (instance instance)
-  (allocator :pointer))
 (defun create-instance (layers extensions)
   (declare (type simple-vector layers extensions))
   (with-foreign-objects ((instance 'instance)
@@ -223,12 +230,6 @@
 
 (defctype physical-device vk-dispatchable)
 
-(define-vulkan-instance-fun (%get-physical-device-queue-family-properties
-                             "vkGetPhysicalDeviceQueueFamilyProperties")
-                            :void
-  (physical-device physical-device)
-  (count (:pointer :uint32))
-  (array (:pointer (:struct queue-family-properties))))
 (defun get-physical-device-queue-family-properties (physical-device count array)
   (%get-physical-device-queue-family-properties physical-device count array)
   0)
@@ -246,14 +247,6 @@
     (unless (zerop (%get-physical-device-surface-support physical-device queue-family-index surface supported))
       (error "vkGetPhysicalDeviceSurfaceSupportKHR"))
     (= 1 (mem-ref supported :uint32))))
-
-(define-vulkan-instance-fun (enumerate-device-extension-properties
-                             "vkEnumerateDeviceExtensionProperties")
-                            vk-result
-  (physical-device physical-device)
-  (layer-name :string)
-  (property-count (:pointer :uint32))
-  (properties (:pointer (:struct extension-properties))))
 
 (defcstruct surface-format
   (format :int)
@@ -315,16 +308,6 @@
 
 (defctype device vk-dispatchable)
 
-(define-vulkan-instance-fun (%create-device "vkCreateDevice") vk-result
-  (physical-device physical-device)
-  (create-info (:pointer (:struct device-create-info)))
-  (allocator :pointer)
-  (device (:pointer device)))
-
-(define-vulkan-device-fun (%destroy-device "vkDestroyDevice") :void
-  (device device)
-  (allocator :pointer))
-
 (defun create-device (physical-device queue &key (extensions #()) (queue-priority 1.0f0))
   (declare (type simple-vector extensions))
   (with-foreign-objects ((device 'device)
@@ -360,11 +343,6 @@
 
 
 (defctype queue vk-dispatchable)
-(define-vulkan-device-fun (%get-device-queue "vkGetDeviceQueue") :void
-  (device device)
-  (queue-family-index :uint32)
-  (queue-index :uint32)
-  (queue (:pointer queue)))
 
 (defun get-device-queue (device queue-family-index queue-index)
   (with-foreign-object (queue 'queue)
@@ -457,11 +435,6 @@
 
 (defctype image-view vk-non-dispatchable)
 
-(define-vulkan-device-fun (%create-image-view "vkCreateImageView") vk-result
-  (device device)
-  (create-info (:pointer (:struct image-view-create-info)))
-  (allocator :pointer)
-  (view (:pointer image-view)))
 (defun create-image-view (image)
   (with-foreign-objects ((view 'image-view)
                          (create-info '(:struct image-view-create-info)))
@@ -476,10 +449,6 @@
       (error "vkCreateImageView"))
     (mem-ref view 'image-view)))
 
-(define-vulkan-device-fun (%destroy-image-view "vkDestroyImageView") :void
-  (device device)
-  (image-view image-view)
-  (allocator :pointer))
 (defun destroy-image-view (image-view)
   (%destroy-image-view (aref *device*) image-view (null-pointer)))
 
@@ -551,11 +520,6 @@
 
 (defctype shader-module vk-non-dispatchable)
 
-(define-vulkan-device-fun (%create-shader-module "vkCreateShaderModule") vk-result
-  (device device)
-  (create-info (:pointer (:struct shader-module-create-info)))
-  (allocator :pointer)
-  (shader-module (:pointer shader-module)))
 (defun create-shader-module (code)
   (with-foreign-objects ((shader-module 'shader-module)
                          (create-info '(:struct shader-module-create-info)))
@@ -567,21 +531,12 @@
         (error "vkCreateShaderModule"))
       (mem-ref shader-module 'shader-module))))
 
-(define-vulkan-device-fun (%destroy-shader-module "vkDestroyShaderModule") :void
-  (device device)
-  (shader-module shader-module)
-  (allocator :pointer))
 (defun destroy-shader-module (shader-module)
   (%destroy-shader-module (aref *device*) shader-module (null-pointer)))
 
 
 (defctype pipeline-layout vk-non-dispatchable)
 
-(define-vulkan-device-fun (%create-pipeline-layout "vkCreatePipelineLayout") vk-result
-  (device device)
-  (create-info (:pointer (:struct pipeline-layout-create-info)))
-  (allocator :pointer)
-  (pipeline-layout (:pointer pipeline-layout)))
 (defun create-pipeline-layout ()
   (with-foreign-objects ((layout 'pipeline-layout)
                          (create-info '(:struct pipeline-layout-create-info)))
@@ -593,21 +548,12 @@
       (error "vkCreatePipelineLayout"))
     (mem-ref layout 'pipeline-layout)))
 
-(define-vulkan-device-fun (%destroy-pipeline-layout "vkDestroyPipelineLayout") :void
-  (device device)
-  (pipeline-layout pipeline-layout)
-  (allocator :pointer))
 (defun destroy-pipeline-layout (pipeline-layout)
   (%destroy-pipeline-layout (aref *device*) pipeline-layout (null-pointer)))
 
 
 (defctype render-pass vk-non-dispatchable)
 
-(define-vulkan-device-fun (%create-render-pass "vkCreateRenderPass") vk-result
-  (device device)
-  (create-info (:pointer (:struct render-pass-create-info)))
-  (allocator :pointer)
-  (render-pass (:pointer render-pass)))
 (defun create-render-pass (attachments subpass)
   (declare (type (vector list) attachments)
            (type list subpass))
@@ -627,29 +573,15 @@
       (error "vkCreateRenderPass"))
     (mem-ref render-pass 'render-pass)))
 
-(define-vulkan-device-fun (%destroy-render-pass "vkDestroyRenderPass") :void
-  (device device)
-  (render-pass render-pass)
-  (allocator :pointer))
 (defun destroy-render-pass (render-pass)
   (%destroy-render-pass (aref *device*) render-pass (null-pointer)))
 
 
 (defctype pipeline vk-non-dispatchable)
-(define-vulkan-device-fun (%destroy-pipeline "vkDestroyPipeline") :void
-  (device device)
-  (pipeline pipeline)
-  (allocator :pointer))
+
 (defun destroy-pipeline (pipeline)
   (%destroy-pipeline (aref *device*) pipeline (null-pointer)))
 
-(define-vulkan-device-fun (%create-graphics-pipelines "vkCreateGraphicsPipelines") vk-result
-  (device device)
-  (pipeline-cache vk-non-dispatchable #+nil pipeline-cache)
-  (create-info-count :uint32)
-  (create-infos (:pointer (:struct graphics-pipeline-create-info)))
-  (allocator :pointer)
-  (pipelines (:pointer pipeline)))
 
 (defun create-graphics-pipeline (vertex-module fragment-module layout render-pass)
   (with-foreign-objects ((pipeline 'pipeline)
@@ -765,11 +697,6 @@
 
 (defctype framebuffer vk-non-dispatchable)
 
-(define-vulkan-device-fun (%create-framebuffer "vkCreateFramebuffer") vk-result
-  (device device)
-  (create-info (:pointer (:struct framebuffer-create-info)))
-  (allocator :pointer)
-  (framebuffer (:pointer framebuffer)))
 (defun create-framebuffer (render-pass image-view)
   (with-foreign-objects ((framebuffer 'framebuffer)
                          (create-info '(:struct framebuffer-create-info))
@@ -784,21 +711,12 @@
       (error "vkCreateFramebuffer"))
     (mem-ref framebuffer 'framebuffer)))
 
-(define-vulkan-device-fun (%destroy-framebuffer "vkDestroyFramebuffer") :void
-  (device device)
-  (framebuffer framebuffer)
-  (allocator :pointer))
 (defun destroy-framebuffer (framebuffer)
   (%destroy-framebuffer (aref *device*) framebuffer (null-pointer)))
 
 
 (defctype command-pool vk-non-dispatchable)
 
-(define-vulkan-device-fun (%create-command-pool "vkCreateCommandPool") vk-result
-  (device device)
-  (create-info (:pointer (:struct command-pool-create-info)))
-  (allocator :pointer)
-  (command-pool (:pointer command-pool)))
 (defun create-command-pool (queue-family-index)
   (with-foreign-objects ((command-pool 'command-pool)
                          (create-info '(:struct command-pool-create-info)))
@@ -809,20 +727,12 @@
       (error "vkCreateCommandPool"))
     (mem-ref command-pool 'command-pool)))
 
-(define-vulkan-device-fun (%destroy-command-pool "vkDestroyCommandPool") :void
-  (device device)
-  (command-pool command-pool)
-  (allocator :pointer))
 (defun destroy-command-pool (command-pool)
   (%destroy-command-pool (aref *device*) command-pool (null-pointer)))
 
 
 (defctype command-buffer vk-dispatchable)
 
-(define-vulkan-device-fun (%allocate-command-buffers "vkAllocateCommandBuffers") vk-result
-  (device device)
-  (allocate-info (:pointer (:struct command-buffer-allocate-info)))
-  (command-buffers (:pointer command-buffer)))
 (defun allocate-command-buffers (command-buffers n-command-buffers command-pool)
   (with-foreign-object (allocate-info '(:struct command-buffer-allocate-info))
     (setf (mem-ref allocate-info '(:struct command-buffer-allocate-info))
@@ -831,11 +741,6 @@
     (unless (zerop (%allocate-command-buffers (aref *device*) allocate-info command-buffers))
       (error "vkAllocateCommandBuffers"))))
 
-(define-vulkan-device-fun (%free-command-buffers "vkFreeCommandBuffers") :void
-  (device device)
-  (command-pool command-pool)
-  (command-buffer-count :uint32)
-  (command-buffers (:pointer command-buffer)))
 (defun free-command-buffers (command-pool command-buffers n-command-buffers)
   (%free-command-buffers (aref *device*) command-pool n-command-buffers command-buffers))
 
@@ -875,26 +780,6 @@
   (color (:union clear-color-value))
   (depth-stencil (:union clear-depth-stencil-value)))
 
-(define-vulkan-device-fun (cmd-begin-render-pass "vkCmdBeginRenderPass") :void
-  (command-buffer command-buffer)
-  (render-pass-begin (:pointer (:struct render-pass-begin-info)))
-  (contents :int))
-
-(define-vulkan-device-fun (cmd-bind-pipeline "vkCmdBindPipeline") :void
-  (command-buffer command-buffer)
-  (pipeline-bind-point :int)
-  (pipeline pipeline))
-
-(define-vulkan-device-fun (cmd-draw "vkCmdDraw") :void
-  (command-buffer command-buffer)
-  (vertex-count :uint32)
-  (instance-count :uint32)
-  (first-vertex :uint32)
-  (first-instance :uint32))
-
-(define-vulkan-device-fun (cmd-end-render-pass "vkCmdEndRenderPass") :void
-  (command-buffer command-buffer))
-
 
 (defctype semaphore vk-non-dispatchable)
 
@@ -911,10 +796,6 @@
     (%create-semaphore (aref *device*) create-info (null-pointer) semaphore)
     (mem-ref semaphore 'semaphore)))
 
-(define-vulkan-device-fun (%destroy-semaphore "vkDestroySemaphore") :void
-  (device device)
-  (semaphore semaphore)
-  (allocator :pointer))
 (defun destroy-semaphore (semaphore)
   (%destroy-semaphore (aref *device*) semaphore (null-pointer)))
 
@@ -934,10 +815,6 @@
     (%create-fence (aref *device*) create-info (null-pointer) fence)
     (mem-ref fence 'fence)))
 
-(define-vulkan-device-fun (%destroy-fence "vkDestroyFence") :void
-  (device device)
-  (fence fence)
-  (allocator :pointer))
 (defun destroy-fence (fence)
   (%destroy-fence (aref *device*) fence (null-pointer)))
 
