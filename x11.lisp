@@ -1,6 +1,8 @@
 (uiop:define-package #:com.andrewsoutar.figment/x11
   (:use #:cl #:alexandria #:cffi #:com.andrewsoutar.just-enough-x11)
-  (:use #:com.andrewsoutar.figment/utils #:com.andrewsoutar.figment/vulkan-bind))
+  (:use #:com.andrewsoutar.figment/utils #:com.andrewsoutar.figment/vulkan-bind)
+  (:import-from #:com.andrewsoutar.figment/vulkan-bind
+                #:*instance* #:*device* #:get-instance-proc-addr #:get-device-proc-addr))
 (cl:in-package #:com.andrewsoutar.figment/x11)
 
 (define-from-xml "xproto"
@@ -25,12 +27,6 @@
 
 
 ;;; Vulkan stuff
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (define-foreign-library libvulkan
-    (:linux "libvulkan.so.1")
-    (t (:default "libvulkan"))))
-(use-foreign-library libvulkan)
-
 (load-registry)
 
 (defctype flags :uint32)
@@ -73,20 +69,13 @@
                       (setf (car loopy) (car body)
                             (cdr loopy) (cdr body))
                       loopy)))))
-  (frob define-vulkan-global-fun nil `(%vk-get-instance-proc-addr (null-pointer) ,vulkan-name))
-  (frob define-vulkan-instance-fun *instance* `(%vk-get-instance-proc-addr (aref *instance*) ,vulkan-name))
-  (frob define-vulkan-device-fun *device* `(%vk-get-device-proc-addr (aref *device*) ,vulkan-name)))
+  (frob define-vulkan-global-fun nil `(get-instance-proc-addr (null-pointer) ,vulkan-name))
+  (frob define-vulkan-instance-fun *instance* `(get-instance-proc-addr (aref *instance*) ,vulkan-name))
+  (frob define-vulkan-device-fun *device* `(get-device-proc-addr (aref *device*) ,vulkan-name)))
 
 (defctype instance vk-dispatchable)
-(defcfun (%vk-get-instance-proc-addr "vkGetInstanceProcAddr" :library libvulkan) :pointer
-  (instance instance)
-  (name :string))
 
 (defctype device vk-dispatchable)
-(define-vulkan-instance-fun (%vk-get-device-proc-addr "vkGetDeviceProcAddr") :pointer
-  (device device)
-  (name :string))
-
 
 (define-vulkan-global-fun (%create-instance "vkCreateInstance") vk-result
   (create-info (:pointer (:struct instance-create-info)))

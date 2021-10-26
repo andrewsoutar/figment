@@ -177,6 +177,24 @@
   `(eval-when (:compile-toplevel :execute)
      (%load-registry ,file)))
 
+(defmacro define-vulkan-func (kind (name vulkan-name) return-type &body args)
+  (multiple-value-bind (var get-pointer-expr)
+      (ecase kind
+        (:global (values nil `(get-instance-proc-addr (null-pointer) ,vulkan-name)))
+        (:instance (values '*instance* `(get-instance-proc-addr (aref *instance*) ,vulkan-name)))
+        (:device (values '*device* `(get-device-proc-addr (aref *device*) ,vulkan-name))))
+    `(defun ,name ,(mapcar #'first args)
+       ,(let* ((loopy (cons nil nil))
+               (body `(let ((pfn ,get-pointer-expr))
+                        (eval `(defun ,',name ,',(mapcar #'first args)
+                                 (if (eql ,',var ',,var)
+                                     (foreign-funcall-pointer ,pfn () ,@',(mapcan #'reverse args) ,',return-type)
+                                     ,',loopy)))
+                        (,name ,@(mapcar #'first args)))))
+          (setf (car loopy) (car body)
+                (cdr loopy) (cdr body))
+          loopy))))
+
 (defmacro gen-vulkan-bindings ((&optional (file *vulkan-file*)) &body body)
   (multiple-value-bind (structs enums)
       (loop for (kind . names) in body
@@ -237,3 +255,22 @@
                                      ,(normalize-type type))))
                                (child-elems struct-el)))))
               structs))))))
+
+
+;;; FIXME this stuff probably shouldn't be here
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (define-foreign-library libvulkan
+    (:linux "libvulkan.so.1")
+    (t (:default "libvulkan"))))
+(use-foreign-library libvulkan)
+
+(defvar *instance*)
+(defvar *device*)
+
+;;; Hack? Might be better to use the "proper" types for instance & device
+(defcfun (get-instance-proc-addr "vkGetInstanceProcAddr" :library libvulkan) :pointer
+  (instance :pointer)
+  (name :string))
+(define-vulkan-func :instance (get-device-proc-addr "vkGetDeviceProcAddr") :pointer
+  (device :pointer)
+  (name :string))
