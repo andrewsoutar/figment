@@ -293,6 +293,7 @@
                   (let* ((vk-name (vulkanize-func-name func-name))
                          (func-el (gethash vk-name func-table)))
                     (destructuring-bind (proto &rest params) (child-elems func-el)
+                      (setf params (remove "implicitexternsyncparams" params :key #'dom:tag-name :test #'equal))
                       (assert (equal (dom:tag-name proto) "proto"))
                       (assert (every (lambda (x) (equal (dom:tag-name x) "param")) params))
                       (destructuring-bind (name return-type) (parse-type-decl (extract-contents proto))
