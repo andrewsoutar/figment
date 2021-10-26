@@ -129,9 +129,14 @@
       ((>= pos (length copy)) (concatenate 'string "Vk" (delete #\- copy)))
     (when (and (alpha-char-p (char copy pos)) (or (zerop pos) (not (alpha-char-p (char copy (1- pos))))))
       (setf (char copy pos) (char-upcase (char copy pos))))))
+(defun vulkanize-func-name (name)
+  ;; Bit of a hack
+  (let ((type-like-name (vulkanize-type-name name)))
+    (setf (char type-like-name 0) #\v)
+    type-like-name))
 (defun vulkanize-enum-value (name)
   (concatenate 'string "VK_" (substitute #\_ #\- (remove #\% (string name)))))
-(defun unvulkanize-field-name (name type &aux (start 0))
+(defun unvulkanize-field-name (name type package &aux (start 0))
   (do () ((not (eql (car (ensure-list type)) :pointer)))
     (assert (eql (char name start) #\p))
     (incf start)
@@ -139,7 +144,7 @@
   (do* ((start start end)
         (end #1=(position-if #'upper-case-p name :start (1+ start)) #1#)
         (temp #2=(string-upcase (subseq name start end)) (concatenate 'string temp "-" #2#)))
-       ((null end) (intern temp :keyword))))
+       ((null end) (if package (intern temp package) (make-symbol temp)))))
 
 (defparameter *vulkan-file* #p"/usr/share/vulkan/registry/vk.xml")
 (defvar *cache* (make-hash-table :test 'equal))
@@ -151,7 +156,8 @@
                 (progn (close stream) (truename stream))))
     (assert (equal (dom:tag-name root) "registry"))
     (let ((type-table (make-hash-table :test 'equal))
-          (const-table (make-hash-table :test 'equal)))
+          (const-table (make-hash-table :test 'equal))
+          (func-table (make-hash-table :test 'equal)))
       (dolist (toplevel-child (child-elems root))
         (match-case (dom:tag-name toplevel-child)
           ("types"
@@ -169,9 +175,19 @@
              (when (equal (dom:tag-name enum-elem) "enum")
                (let ((name (get-attribute enum-elem "name")))
                  (assert name)
-                 (assert (null (shiftf (gethash name const-table) enum-elem)))))))))
+                 (assert (null (shiftf (gethash name const-table) enum-elem)))))))
+          ("commands"
+           (dolist (command-elem (child-elems toplevel-child))
+             (assert (equal (dom:tag-name command-elem) "command"))
+             (let ((name (or (get-attribute command-elem "name")
+                             (let ((proto (first (child-elems command-elem))))
+                               (assert (equal (dom:tag-name proto) "proto"))
+                               (extract-contents (find "name" (child-elems proto)
+                                                       :key #'dom:tag-name :test #'equal))))))
+               (assert (null (shiftf (gethash name func-table) command-elem))))
+             ))))
       (setf (gethash file *cache*)
-            (setf (gethash truename *cache*) (list type-table const-table))))
+            (setf (gethash truename *cache*) (list type-table const-table func-table))))
     truename))
 (defmacro load-registry (&optional (file '*vulkan-file*))
   `(eval-when (:compile-toplevel :execute)
@@ -196,14 +212,16 @@
           loopy))))
 
 (defmacro gen-vulkan-bindings ((&optional (file *vulkan-file*)) &body body)
-  (multiple-value-bind (structs enums)
+  (multiple-value-bind (structs enums functions)
       (loop for (kind . names) in body
             when (eql kind :structs)
               append names into structs
             when (eql kind :enums)
               append names into enums
-            finally (return (values structs enums)))
-    (destructuring-bind (type-table const-table) (gethash file *cache*)
+            when (eql kind :functions)
+              append names into functions
+            finally (return (values structs enums functions)))
+    (destructuring-bind (type-table const-table func-table) (gethash file *cache*)
       (labels ((normalize-type (type)
                  (match-ecase type
                    ((:pointer &rest) :pointer)
@@ -251,10 +269,41 @@
                                  (assert (equal (dom:tag-name member) "member"))
                                  (destructuring-bind (name type)
                                      (parse-type-decl (extract-contents member))
-                                   `(,(unvulkanize-field-name name type)
+                                   `(,(unvulkanize-field-name name type :keyword)
                                      ,(normalize-type type))))
                                (child-elems struct-el)))))
-              structs))))))
+              structs)
+           ,@(labels ((function-kind (name params)
+                        ;; vkspec 4.1
+                        (if (member name '("vkEnumerateInstanceVersion" "vkEnumerateInstanceExtensionProperties"
+                                           "vkEnumerateInstanceLayerProperties" "vkCreateInstance")
+                                    :test #'equal)
+                            :global
+                            (destructuring-bind (name type) (parse-type-decl (extract-contents (first params)))
+                              (declare (ignore name))
+                              (function-kind-for-type type))))
+                      (function-kind-for-type (type)
+                        (match-ecase type
+                          ("VkDevice" :device)
+                          ("VkInstance" :instance)
+                          ((m:type string)
+                           (function-kind-for-type (get-attribute (first (gethash type type-table)) "parent"))))))
+               (mapcar
+                (lambda (func-name)
+                  (let* ((vk-name (vulkanize-func-name func-name))
+                         (func-el (gethash vk-name func-table)))
+                    (destructuring-bind (proto &rest params) (child-elems func-el)
+                      (assert (equal (dom:tag-name proto) "proto"))
+                      (assert (every (lambda (x) (equal (dom:tag-name x) "param")) params))
+                      (destructuring-bind (name return-type) (parse-type-decl (extract-contents proto))
+                        (assert (equal name vk-name))
+                        `(define-vulkan-func ,(function-kind vk-name params) (,func-name ,vk-name)
+                             ,(normalize-type return-type)
+                           ,@(mapcar (lambda (param)
+                                       (destructuring-bind (name type) (parse-type-decl (extract-contents param))
+                                         `(,(unvulkanize-field-name name type nil) ,(normalize-type type))))
+                                     params))))))
+                functions)))))))
 
 
 ;;; FIXME this stuff probably shouldn't be here

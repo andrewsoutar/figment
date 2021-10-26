@@ -49,7 +49,8 @@
             pipeline-color-blend-attachment-state pipeline-color-blend-state-create-info
             graphics-pipeline-create-info framebuffer-create-info command-pool-create-info
             command-buffer-allocate-info command-buffer-begin-info render-pass-begin-info
-            semaphore-create-info fence-create-info submit-info))
+            semaphore-create-info fence-create-info submit-info)
+  (:functions enumerate-physical-devices))
 
 (defvar *instance*)
 (defvar *device*)
@@ -221,10 +222,6 @@
                   (t (error "Error from enumerator ~A: ~A" ',wrapped-fun ,result))))))))))
 
 (defctype physical-device vk-dispatchable)
-(define-vulkan-instance-fun (enumerate-physical-devices "vkEnumeratePhysicalDevices") vk-result
-  (instance instance)
-  (phys-dev-count (:pointer :uint32))
-  (phys-devs (:pointer physical-device)))
 
 (define-vulkan-instance-fun (%get-physical-device-queue-family-properties
                              "vkGetPhysicalDeviceQueueFamilyProperties")
