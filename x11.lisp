@@ -36,20 +36,20 @@
 (defctype vk-non-dispatchable :uint64)
 
 (gen-vulkan-bindings ()
-  (:enums structure-type)
-  (:structs offset-2d offset-3d extent-2d extent-3d rect-2d
-            instance-create-info queue-family-properties extension-properties
-            device-queue-create-info device-create-info
-            component-mapping image-subresource-range image-view-create-info
-            shader-module-create-info pipeline-layout-create-info
-            attachment-reference attachment-description subpass-description render-pass-create-info
-            pipeline-shader-stage-create-info pipeline-vertex-input-state-create-info
-            pipeline-input-assembly-state-create-info viewport pipeline-viewport-state-create-info
-            pipeline-rasterization-state-create-info pipeline-multisample-state-create-info
-            pipeline-color-blend-attachment-state pipeline-color-blend-state-create-info
-            graphics-pipeline-create-info framebuffer-create-info command-pool-create-info
-            command-buffer-allocate-info command-buffer-begin-info render-pass-begin-info
-            semaphore-create-info fence-create-info submit-info)
+  (:types structure-type
+          offset-2d offset-3d extent-2d extent-3d rect-2d
+          instance-create-info queue-family-properties extension-properties
+          device-queue-create-info device-create-info
+          component-mapping image-subresource-range image-view-create-info
+          shader-module-create-info pipeline-layout-create-info
+          attachment-reference attachment-description subpass-description render-pass-create-info
+          pipeline-shader-stage-create-info pipeline-vertex-input-state-create-info
+          pipeline-input-assembly-state-create-info viewport pipeline-viewport-state-create-info
+          pipeline-rasterization-state-create-info pipeline-multisample-state-create-info
+          pipeline-color-blend-attachment-state pipeline-color-blend-state-create-info
+          graphics-pipeline-create-info framebuffer-create-info command-pool-create-info
+          command-buffer-allocate-info command-buffer-begin-info render-pass-begin-info
+          semaphore-create-info fence-create-info submit-info)
   (:functions %create-instance %destroy-instance
               enumerate-physical-devices
               %get-physical-device-queue-family-properties

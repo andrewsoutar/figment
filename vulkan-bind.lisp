@@ -212,15 +212,13 @@
           loopy))))
 
 (defmacro gen-vulkan-bindings ((&optional (file *vulkan-file*)) &body body)
-  (multiple-value-bind (structs enums functions)
+  (multiple-value-bind (types functions)
       (loop for (kind . names) in body
-            when (eql kind :structs)
-              append names into structs
-            when (eql kind :enums)
-              append names into enums
+            when (eql kind :types)
+              append names into types
             when (eql kind :functions)
               append names into functions
-            finally (return (values structs enums functions)))
+            finally (return (values types functions)))
     (destructuring-bind (type-table const-table func-table) (gethash file *cache*)
       (labels ((normalize-type (type)
                  (match-ecase type
@@ -233,46 +231,43 @@
                    ("uint32_t" :uint32)
                    ("size_t" :size)
                    ("VkBool32" `(:boolean :uint32))
-                   ((m:type string) (let ((elem (first (gethash type type-table))))
+                   ((m:type string) (let ((sym (find type types :key #'vulkanize-type-name :test #'equal))
+                                          (elem (first (gethash type type-table))))
                                       (match-ecase (get-attribute elem "category")
-                                        ((m:or "enum" "bitmask")
-                                         (or (find type enums :key #'vulkanize-type-name :test #'equal) :int))
-                                        ("struct"
-                                         `(:struct ,(or (find type structs :key #'vulkanize-type-name :test #'equal)
-                                                        (error "Struct ~A does not have a name!" type))))
+                                        ((m:or "enum" "bitmask") (or sym :int))
+                                        ("struct" `(:struct ,(or sym (error "Struct ~A does not have a name!" type))))
                                         ("handle"
-                                         (match-ecase (extract-contents elem)
-                                           ((m:equal (format nil "VK_DEFINE_HANDLE(~A)" type)) :pointer)
-                                           ((m:equal (format nil "VK_DEFINE_NON_DISPATCHABLE_HANDLE(~A)" type))
-                                            :uint64)))))))))
+                                         (or sym
+                                             (match-ecase (extract-contents elem)
+                                               ((m:equal (format nil "VK_DEFINE_HANDLE(~A)" type)) :pointer)
+                                               ((m:equal (format nil "VK_DEFINE_NON_DISPATCHABLE_HANDLE(~A)" type))
+                                                :uint64))))))))))
         `(progn
            ,@(mapcar
-              (lambda (enum-name)
-                (let* ((type-name (vulkanize-type-name enum-name))
-                       (prefix (concatenate 'string (vulkanize-enum-value enum-name) "_"))
-                       (enums-el (second (gethash type-name type-table))))
-                  `(defcenum ,enum-name
-                     ,@(mapcar (lambda (value)
-                                 (assert (equal (dom:tag-name value) "enum"))
-                                 (let ((val-name (get-attribute value "name")))
-                                   (assert (string= prefix val-name :end2 (length prefix)))
-                                   `(,(intern (nsubstitute #\- #\_ (subseq val-name (length prefix))) :keyword)
-                                     ,(parse-integer (get-attribute value "value")))))
-                               (child-elems enums-el)))))
-              enums)
-           ,@(mapcar
-              (lambda (struct-name)
-                (let* ((type-name (vulkanize-type-name struct-name))
-                       (struct-el (first (gethash type-name type-table))))
-                  `(defcstruct ,struct-name
-                     ,@(mapcar (lambda (member)
-                                 (assert (equal (dom:tag-name member) "member"))
-                                 (destructuring-bind (name type)
-                                     (parse-type-decl (extract-contents member))
-                                   `(,(unvulkanize-field-name name type :keyword)
-                                     ,(normalize-type type))))
-                               (child-elems struct-el)))))
-              structs)
+              (lambda (type-name)
+                (match-let* ((vk-name (vulkanize-type-name type-name))
+                             ((type-elem enums-elem) (gethash vk-name type-table)))
+                  (match-ecase (get-attribute type-elem "category")
+                    ("enum"
+                     (let ((prefix (concatenate 'string (vulkanize-enum-value type-name) "_")))
+                       `(defcenum ,type-name
+                          ,@(mapcar (lambda (value)
+                                      (assert (equal (dom:tag-name value) "enum"))
+                                      (let ((val-name (get-attribute value "name")))
+                                        (assert (string= prefix val-name :end2 (length prefix)))
+                                        `(,(intern (nsubstitute #\- #\_ (subseq val-name (length prefix))) :keyword)
+                                          ,(parse-integer (get-attribute value "value")))))
+                                    (child-elems enums-elem)))))
+                    ("struct"
+                     `(defcstruct ,type-name
+                        ,@(mapcar (lambda (member)
+                                    (assert (equal (dom:tag-name member) "member"))
+                                    (destructuring-bind (name type)
+                                        (parse-type-decl (extract-contents member))
+                                      `(,(unvulkanize-field-name name type :keyword)
+                                        ,(normalize-type type))))
+                                  (child-elems type-elem)))))))
+              types)
            ,@(labels ((function-kind (name params)
                         ;; vkspec 4.1
                         (if (member name '("vkEnumerateInstanceVersion" "vkEnumerateInstanceExtensionProperties"
@@ -299,7 +294,7 @@
                       (destructuring-bind (name return-type) (parse-type-decl (extract-contents proto))
                         (assert (equal name vk-name))
                         `(define-vulkan-func ,(function-kind vk-name params) (,func-name ,vk-name)
-                             ,(normalize-type return-type)
+                                             ,(normalize-type return-type)
                            ,@(mapcar (lambda (param)
                                        (destructuring-bind (name type) (parse-type-decl (extract-contents param))
                                          `(,(unvulkanize-field-name name type nil) ,(normalize-type type))))
