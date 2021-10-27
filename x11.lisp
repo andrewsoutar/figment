@@ -56,7 +56,7 @@
               enumerate-physical-devices
               %get-physical-device-queue-family-properties
               enumerate-device-extension-properties
-              %create-device %destroy-device %get-device-queue
+              %create-device %destroy-device %get-device-queue queue-submit queue-wait-idle queue-present-khr
               %create-image-view %destroy-image-view
               %create-shader-module %destroy-shader-module
               %create-pipeline-layout %destroy-pipeline-layout
@@ -66,34 +66,15 @@
               %create-command-pool %destroy-command-pool
               %allocate-command-buffers %free-command-buffers
               cmd-begin-render-pass cmd-bind-pipeline cmd-draw cmd-end-render-pass
-              %destroy-semaphore %destroy-fence
+              %create-semaphore %destroy-semaphore
+              %create-fence %destroy-fence wait-for-fences reset-fences
               %destroy-surface-khr %create-xcb-surface-khr
               %get-physical-device-surface-support-khr
               get-physical-device-surface-formats-khr
               get-physical-device-surface-capabilities-khr
-              %create-swapchain-khr %destroy-swapchain-khr get-swapchain-images-khr))
+              %create-swapchain-khr %destroy-swapchain-khr get-swapchain-images-khr acquire-next-image-khr
+              %begin-command-buffer end-command-buffer))
 
-(defvar *instance*)
-(defvar *device*)
-(macrolet ((frob (name var getter)
-             `(defmacro ,name ((name vulkan-name) return-type &body lambda-list)
-                `(defun ,name ,(mapcar #'first lambda-list)
-                   ,(let* ((loopy (cons nil nil))
-                           (body
-                             `(let ((pfn ,,getter))
-                                (eval `(defun ,',name ,',(mapcar #'first lambda-list)
-                                         (if (eql ,,'',var ,,',var)
-                                             (foreign-funcall-pointer ,pfn ()
-                                                                      ,@',(mapcan #'reverse lambda-list)
-                                                                      ,',return-type)
-                                             ,',loopy)))
-                                (,name ,@(mapcar #'first lambda-list)))))
-                      (setf (car loopy) (car body)
-                            (cdr loopy) (cdr body))
-                      loopy)))))
-  (frob define-vulkan-global-fun nil `(get-instance-proc-addr (null-pointer) ,vulkan-name))
-  (frob define-vulkan-instance-fun *instance* `(get-instance-proc-addr (aref *instance*) ,vulkan-name))
-  (frob define-vulkan-device-fun *device* `(get-device-proc-addr (aref *device*) ,vulkan-name)))
 
 (defctype instance vk-dispatchable)
 
@@ -132,66 +113,6 @@
   `(with-cleanups ((*instance* (create-instance ,layers ,extensions)
                                (lambda (i) (%destroy-instance (aref i) (null-pointer)))))
      ,@body))
-
-#+nil
-(defmacro define-vulkan-object ((name kind &key create-structure-type suffix
-                                             (actual-object-name name) (param 'instance))
-                                &body create-info-fields)
-  `(progn
-     ,@(unless (eql kind :none)
-         `((defctype ,actual-object-name
-               ,(ecase kind
-                  (:dispatchable :pointer)
-                  (:non-dispatchable :uint64)))
-           (defvkfun (,(intern (format nil "DESTROY-~A" name) (symbol-package name))
-                      ,(format nil "vkDestroy~A~@[~A~]" (delete #\- (string-capitalize actual-object-name)) suffix))
-                     :void
-             ,@(when param `((,param ,param)))
-             (,name ,actual-object-name)
-             (allocator :pointer))))
-     ,@(when create-structure-type
-         (let ((create-name (intern (format nil "%CREATE-~A" name) (symbol-package name)))
-               (create-info-name (intern (format nil "%~A-CREATE-INFO" name) (symbol-package name))))
-           `((defcstruct ,create-info-name
-               (stype structure-type)
-               (next :pointer)
-               ,@create-info-fields)
-             (defvkfun (,create-name
-                        ,(format nil "vkCreate~A~@[~A~]" (delete #\- (string-capitalize name)) suffix))
-                       vk-result
-               ,@(when param `((,param ,param)))
-               (create-info (:pointer (:struct ,create-info-name)))
-               (allocator :pointer)
-               (,name (:pointer ,actual-object-name)))
-             (defun ,(intern (format nil "CREATE-~A" name) (symbol-package name))
-                 (,@(when param `(,param)) ,@(mapcar #'first create-info-fields))
-               ,(with-gensyms (object create-info)
-                  `(with-foreign-objects ((,object ',actual-object-name)
-                                          (,create-info '(:struct ,create-info-name)))
-                     (setf (mem-ref ,create-info '(:struct ,create-info-name))
-                           (list 'stype ',create-structure-type
-                                 'next (null-pointer)
-                                 ,@(mapcan (lambda (ci) `(',(car ci) ,(car ci))) create-info-fields)))
-                     (assert (zerop (let ,(when (null param) `((*instance* (null-pointer))))
-                                      (,create-name ,@(when param `(,param)) ,create-info (null-pointer) ,object))))
-                     (mem-ref ,object ',actual-object-name)))))))))
-
-#+nil
-(define-vulkan-object (instance :dispatchable :create-structure-type 1 :param nil)
-  (flags flags)
-  (application-info :pointer)
-  (enabled-layer-count :uint32)
-  (enabled-layers (:pointer :string))
-  (enabled-extension-count :uint32)
-  (enabled-extensions (:pointer :string)))
-
-#+nil
-(define-vulkan-object (surface :non-dispatchable :suffix "KHR"))
-#+nil
-(define-vulkan-object (xcb-surface :none :create-structure-type 1000005000 :suffix "KHR" :actual-object-name surface)
-  (flags flags)
-  (connection :pointer)
-  (window :uint32))
 
 (defctype surface vk-non-dispatchable)
 
@@ -653,29 +574,11 @@
   (%free-command-buffers (aref *device*) command-pool n-command-buffers command-buffers))
 
 
-(defmacro defvk (kind (name vk-name) &body lambda-list)
-  (let ((%name (intern (format nil "%~A" name) (symbol-package name)))
-        (lambda-list (mapcar (lambda (ll) (if (consp ll) ll (list ll ll))) lambda-list)))
-    `(progn (,(ecase kind
-                ((:global) 'define-vulkan-global-fun)
-                ((:instance) 'define-vulkan-instance-fun)
-                ((:device) 'define-vulkan-device-fun))
-             (,%name ,vk-name) vk-result ,@lambda-list)
-            (defun ,name ,(mapcar #'first lambda-list)
-              (unless (zerop (,%name ,@(mapcar #'first lambda-list)))
-                (error "~A" ',vk-name))))))
-
-(defvk :device (%begin-command-buffer "vkBeginCommandBuffer")
-  command-buffer
-  (begin-info (:pointer (:struct command-buffer-begin-info))))
 (defun begin-command-buffer (command-buffer)
   (with-foreign-object (begin-info '(:struct command-buffer-begin-info))
     (setf (mem-ref begin-info '(:struct command-buffer-begin-info))
           (list :s-type :command-buffer-begin-info :next (null-pointer) :flags 0 :inheritance-info (null-pointer)))
     (%begin-command-buffer command-buffer begin-info)))
-
-(defvk :device (end-command-buffer "vkEndCommandBuffer")
-  command-buffer)
 
 (defcunion clear-color-value
   (float32 (:array :float 4))
@@ -691,11 +594,6 @@
 
 (defctype semaphore vk-non-dispatchable)
 
-(defvk :device (%create-semaphore "vkCreateSemaphore")
-  device
-  (create-info (:pointer (:struct semaphore-create-info)))
-  (allocator :pointer)
-  (semaphore (:pointer semaphore)))
 (defun create-semaphore ()
   (with-foreign-objects ((semaphore 'semaphore)
                          (create-info '(:struct semaphore-create-info)))
@@ -710,11 +608,6 @@
 
 (defctype fence vk-non-dispatchable)
 
-(defvk :device (%create-fence "vkCreateFence")
-  device
-  (create-info (:pointer (:struct fence-create-info)))
-  (allocator :pointer)
-  (fence (:pointer fence)))
 (defun create-fence ()
   (with-foreign-objects ((fence 'fence)
                          (create-info '(:struct fence-create-info)))
@@ -725,37 +618,6 @@
 
 (defun destroy-fence (fence)
   (%destroy-fence (aref *device*) fence (null-pointer)))
-
-(defvk :device (wait-for-fences "vkWaitForFences")
-  device
-  (fence-count :uint32)
-  (fences (:pointer fence))
-  (wait-all :uint32)
-  (timeout :uint64))
-
-(defvk :device (reset-fences "vkResetFences")
-  device
-  (fence-count :uint32)
-  (fences (:pointer fence)))
-
-
-(defvk :device (acquire-next-image "vkAcquireNextImageKHR")
-  device swapchain (timeout :uint64) semaphore fence
-  (image-index (:pointer :uint32)))
-
-
-(defvk :device (queue-submit "vkQueueSubmit")
-  queue
-  (submit-count :uint32)
-  (submits :pointer)
-  fence)
-
-
-(defvk :device (queue-present "vkQueuePresentKHR")
-  queue (present-info :pointer))
-
-
-(defvk :device (queue-wait-idle "vkQueueWaitIdle") queue)
 
 
 (defun main ()
@@ -859,8 +721,8 @@
              (error "xcb_flush")))
     (loop
       (let ((image-index (with-foreign-object (img :uint32)
-                           (acquire-next-image (aref *device*) swapchain (1- (ash 1 64))
-                                               image-available-sem 0 img)
+                           (acquire-next-image-khr (aref *device*) swapchain (1- (ash 1 64))
+                                                   image-available-sem 0 img)
                            (mem-ref img :uint32))))
         (with-foreign-objects ((submit-info '(:struct submit-info) 1)
                                (wait-semaphores 'semaphore 1)
@@ -887,7 +749,7 @@
                       :wait-semaphore-count 1 :wait-semaphores wait-semaphores
                       :swapchain-count 1 :swapchains swapchains
                       :image-indices indices :results (null-pointer)))
-          (queue-present queue present-info)))
+          (queue-present-khr queue present-info)))
       (unless (= (xcb-flush conn) 1)
         (error "xcb_flush"))
       (with-foreign-object (fences 'fence 1)

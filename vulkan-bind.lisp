@@ -245,6 +245,7 @@
                    ("float" :float)
                    ("int32_t" :int32)
                    ("uint32_t" :uint32)
+                   ("uint64_t" :uint64)
                    ("size_t" :size)
                    ("VkBool32" `(:boolean :uint32))
                    ("xcb_window_t" :uint32)
