@@ -755,10 +755,4 @@
       (with-foreign-object (fences 'fence 1)
         (setf (mem-aref fences 'fence 0) fence)
         (wait-for-fences (aref *device*) 1 fences 0 (1- (ash 1 64)))
-        (reset-fences (aref *device*) 1 fences)))
-    #+nil
-    (progn
-      (map-window conn win)
-      (unless (= (xcb-flush conn) 1)
-        (error "xcb_flush"))
-      (sleep 100))))
+        (reset-fences (aref *device*) 1 fences)))))
