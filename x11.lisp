@@ -49,7 +49,9 @@
           pipeline-color-blend-attachment-state pipeline-color-blend-state-create-info
           graphics-pipeline-create-info framebuffer-create-info command-pool-create-info
           command-buffer-allocate-info command-buffer-begin-info render-pass-begin-info
-          semaphore-create-info fence-create-info submit-info)
+          semaphore-create-info fence-create-info submit-info
+          xcb-surface-create-info-khr surface-format-khr surface-capabilities-khr
+          swapchain-create-info-khr present-info-khr)
   (:functions %create-instance %destroy-instance
               enumerate-physical-devices
               %get-physical-device-queue-family-properties
@@ -64,7 +66,12 @@
               %create-command-pool %destroy-command-pool
               %allocate-command-buffers %free-command-buffers
               cmd-begin-render-pass cmd-bind-pipeline cmd-draw cmd-end-render-pass
-              %destroy-semaphore %destroy-fence))
+              %destroy-semaphore %destroy-fence
+              %destroy-surface-khr %create-xcb-surface-khr
+              %get-physical-device-surface-support-khr
+              get-physical-device-surface-formats-khr
+              get-physical-device-surface-capabilities-khr
+              %create-swapchain-khr %destroy-swapchain-khr get-swapchain-images-khr))
 
 (defvar *instance*)
 (defvar *device*)
@@ -188,27 +195,13 @@
   (window :uint32))
 
 (defctype surface vk-non-dispatchable)
-(define-vulkan-instance-fun (%destroy-surface "vkDestroySurfaceKHR") :void
-  (instance instance)
-  (surface surface)
-  (allocator :pointer))
-(defun destroy-surface (surface)
-  (%destroy-surface (aref *instance*) surface (null-pointer)))
 
-(defcstruct %xcb-surface-create-info
-  (stype structure-type)
-  (next :pointer)
-  (flags flags)
-  (connection :pointer)
-  (window :uint32))
-(define-vulkan-instance-fun (%create-xcb-surface "vkCreateXcbSurfaceKHR") vk-result
-  (instance instance)
-  (create-info (:pointer (:struct %xcb-surface-create-info)))
-  (allocator :pointer)
-  (surface (:pointer surface)))
+(defun destroy-surface (surface)
+  (%destroy-surface-khr (aref *instance*) surface (null-pointer)))
+
 (defun create-xcb-surface (create-info)
   (with-foreign-object (surface 'surface)
-    (unless (zerop (%create-xcb-surface (aref *instance*) create-info (null-pointer) surface))
+    (unless (zerop (%create-xcb-surface-khr (aref *instance*) create-info (null-pointer) surface))
       (error "vkCreateSurfaceKHR"))
     (mem-ref surface 'surface)))
 
@@ -235,29 +228,11 @@
   0)
 
 
-(define-vulkan-instance-fun (%get-physical-device-surface-support
-                             "vkGetPhysicalDeviceSurfaceSupportKHR")
-                            vk-result
-  (physical-device physical-device)
-  (queue-family-index :uint32)
-  (surface surface)
-  (supported (:pointer :uint32)))
 (defun get-physical-device-surface-support (physical-device queue-family-index surface)
   (with-foreign-object (supported :uint32)
-    (unless (zerop (%get-physical-device-surface-support physical-device queue-family-index surface supported))
+    (unless (zerop (%get-physical-device-surface-support-khr physical-device queue-family-index surface supported))
       (error "vkGetPhysicalDeviceSurfaceSupportKHR"))
     (= 1 (mem-ref supported :uint32))))
-
-(defcstruct surface-format
-  (format :int)
-  (color-space :int))
-(define-vulkan-instance-fun (get-physical-device-surface-formats
-                             "vkGetPhysicalDeviceSurfaceFormatsKHR")
-                            vk-result
-  (device physical-device)
-  (surface surface)
-  (surface-format-count (:pointer :uint32))
-  (surface-formats (:pointer (:struct surface-format))))
 
 
 (defmacro do-foreign-array ((var array type length &key pointerp) &body body)
@@ -287,11 +262,11 @@
                              (return t))))
                        #("VK_KHR_swapchain"))
           (go skip)))
-      (with-enumerated-objects (fmt-count fmt-array (:struct surface-format))
-          (get-physical-device-surface-formats physical-device surface)
-        (unless (do-foreign-array (fmt fmt-array (:struct surface-format) fmt-count)
-                  (when (and (eql (getf fmt 'format) *image-format*)
-                             (eql (getf fmt 'color-space) *image-color-space*))
+      (with-enumerated-objects (fmt-count fmt-array (:struct surface-format-khr))
+          (get-physical-device-surface-formats-khr physical-device surface)
+        (unless (do-foreign-array (fmt fmt-array (:struct surface-format-khr) fmt-count)
+                  (when (and (eql (getf fmt :format) *image-format*)
+                             (eql (getf fmt :color-space) *image-color-space*))
                     (return t)))
           (go skip)))
       (with-enumerated-objects (qf-count qf-array (:struct queue-family-properties))
@@ -350,87 +325,33 @@
     (mem-ref queue 'queue)))
 
 
-(defcstruct surface-capabilities
-  (min-image-count :uint32)
-  (max-image-count :uint32)
-  (current-extent (:struct extent-2d))
-  (min-image-extent (:struct extent-2d))
-  (max-image-extent (:struct extent-2d))
-  (max-image-array-layers :uint32)
-  (supported-transforms :int)
-  (current-transform :int)
-  (supported-composite-alpha :int)
-  (supported-usage-flags flags))
-
-(define-vulkan-instance-fun (get-physical-device-surface-capabilities
-                             "vkGetPhysicalDeviceSurfaceCapabilitiesKHR")
-                            vk-result
-  (physical-device physical-device)
-  (surface surface)
-  (surface-capabilities (:pointer (:struct surface-capabilities))))
-
 
 (defctype swapchain vk-non-dispatchable)
 
-(defcstruct swapchain-create-info
-  (stype structure-type)
-  (next :pointer)
-  (flags flags)
-  (surface surface)
-  (min-image-count :uint32)
-  (image-format :int)
-  (image-color-space :int)
-  (image-extent (:struct extent-2d))
-  (image-array-layers :uint32)
-  (image-usage flags)
-  (image-sharing-mode :int)
-  (queue-family-index-count :uint32)
-  (queue-family-indices (:pointer :uint32))
-  (pre-transform :int)
-  (composite-alpha :int)
-  (present-mode :int)
-  (clipped :uint32)
-  (old-swapchain swapchain))
-(define-vulkan-device-fun (%create-swapchain "vkCreateSwapchainKHR") vk-result
-  (device device)
-  (create-info (:pointer (:struct swapchain-create-info)))
-  (allocator :pointer)
-  (swapchain (:pointer swapchain)))
-
 
 (defctype image vk-non-dispatchable)
-(define-vulkan-device-fun (get-swapchain-images "vkGetSwapchainImagesKHR") vk-result
-  (device device)
-  (swapchain swapchain)
-  (swapchain-image-count (:pointer :uint32))
-  (swapchain-images (:pointer image)))
-
 
 (defun create-swapchain (surface &key min-image-count)
   (with-foreign-objects ((swapchain 'swapchain)
-                         (create-info '(:struct swapchain-create-info)))
-    (setf (mem-ref create-info '(:struct swapchain-create-info))
-          (list 'stype 1000001000 'next (null-pointer) 'flags 0
-                'surface surface 'min-image-count min-image-count
-                'image-format *image-format* 'image-color-space *image-color-space*
-                'image-extent '(:width 600 :height 400) 'image-array-layers 1
-                'image-usage #x00000010 ; VK_IMAGE_USE_COLOR_ATTACHMENT_BIT
-                'image-sharing-mode 0
-                'queue-family-index-count 0 'queue-family-indices (null-pointer)
-                'pre-transform #x00000001  ; VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR
-                'composite-alpha #x00000001 ; VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
-                'present-mode 2         ; VK_PRESENT_MODE_FIFO_KHR
-                'clipped 0 'old-swapchain 0))
-    (unless (zerop (%create-swapchain (aref *device*) create-info (null-pointer) swapchain))
+                         (create-info '(:struct swapchain-create-info-khr)))
+    (setf (mem-ref create-info '(:struct swapchain-create-info-khr))
+          (list :s-type 1000001000 :next (null-pointer) :flags 0
+                :surface surface :min-image-count min-image-count
+                :image-format *image-format* :image-color-space *image-color-space*
+                :image-extent '(:width 600 :height 400) :image-array-layers 1
+                :image-usage #x00000010 ; VK_IMAGE_USE_COLOR_ATTACHMENT_BIT
+                :image-sharing-mode 0
+                :queue-family-index-count 0 :queue-family-indices (null-pointer)
+                :pre-transform #x00000001  ; VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR
+                :composite-alpha #x00000001 ; VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
+                :present-mode 2         ; VK_PRESENT_MODE_FIFO_KHR
+                :clipped 0 :old-swapchain 0))
+    (unless (zerop (%create-swapchain-khr (aref *device*) create-info (null-pointer) swapchain))
       (error "vkCreateSwapchainKHR"))
     (mem-ref swapchain 'swapchain)))
 
-(define-vulkan-device-fun (%destroy-swapchain "vkDestroySwapchainKHR") :void
-  (device device)
-  (swapchain swapchain)
-  (allocator :pointer))
 (defun destroy-swapchain (swapchain)
-  (%destroy-swapchain (aref *device*) swapchain (null-pointer)))
+  (%destroy-swapchain-khr (aref *device*) swapchain (null-pointer)))
 
 
 (defctype image-view vk-non-dispatchable)
@@ -843,17 +764,8 @@
   fence)
 
 
-(defcstruct present-info
-  (stype structure-type)
-  (next :pointer)
-  (wait-semaphore-count :uint32)
-  (wait-semaphores (:pointer semaphore))
-  (swapchain-count :uint32)
-  (swapchains (:pointer swapchain))
-  (image-indices (:pointer :uint32))
-  (results (:pointer vk-result)))
 (defvk :device (queue-present "vkQueuePresentKHR")
-  queue (present-info (:pointer (:struct present-info))))
+  queue (present-info :pointer))
 
 
 (defvk :device (queue-wait-idle "vkQueueWaitIdle") queue)
@@ -877,10 +789,10 @@
         (unless (= (xcb-flush conn) 1)
           (error "xcb_flush"))))
     (with-instance (#("VK_LAYER_KHRONOS_validation") #("VK_KHR_surface" "VK_KHR_xcb_surface")))
-    (with-cleanups ((surface (with-foreign-object (create-info '(:struct %xcb-surface-create-info))
-                               (setf (mem-ref create-info '(:struct %xcb-surface-create-info))
-                                     (list 'stype 1000005000 'next (null-pointer)
-                                           'flags 0 'connection conn 'window win))
+    (with-cleanups ((surface (with-foreign-object (create-info '(:struct xcb-surface-create-info-khr))
+                               (setf (mem-ref create-info '(:struct xcb-surface-create-info-khr))
+                                     (list :s-type 1000005000 :next (null-pointer)
+                                           :flags 0 :connection conn :window win))
                                (create-xcb-surface create-info))
                              #'destroy-surface)))
     (multiple-value-bind (physical-device queue-family)
@@ -890,15 +802,16 @@
     (with-device (create-device physical-device queue-family :extensions #("VK_KHR_swapchain") :queue-priority 1.0f0))
     (let ((queue (get-device-queue (aref *device*) queue-family 0))))
     (with-cleanups ((swapchain (multiple-value-bind (min-image-count)
-                                   (with-foreign-object (capabilities-p '(:struct surface-capabilities))
-                                     (unless (zerop (get-physical-device-surface-capabilities
+                                   (with-foreign-object (capabilities-p '(:struct surface-capabilities-khr))
+                                     (unless (zerop (get-physical-device-surface-capabilities-khr
                                                      physical-device surface capabilities-p))
                                        (error "vkGetPhysicalDeviceSurfaceCapabilitiesKHR"))
-                                     (let ((capabilities (mem-ref capabilities-p '(:struct surface-capabilities))))
-                                       (values (getf capabilities 'min-image-count))))
+                                     (let ((capabilities
+                                             (mem-ref capabilities-p '(:struct surface-capabilities-khr))))
+                                       (values (getf capabilities :min-image-count))))
                                  (create-swapchain surface :min-image-count (1+ min-image-count)))
                                #'destroy-swapchain)))
-    (let ((images (with-enumerated-objects (count array image) (get-swapchain-images (aref *device*) swapchain)
+    (let ((images (with-enumerated-objects (count array image) (get-swapchain-images-khr (aref *device*) swapchain)
                     (let ((a (make-array count)))
                       (dotimes (i count) (setf (aref a i) (mem-aref array 'image i)))
                       a)))))
@@ -976,18 +889,18 @@
                       :command-buffer-count 1 :command-buffers (mem-aptr cmd-bufs 'command-buffer image-index)
                       :signal-semaphore-count 1 :signal-semaphores signal-semaphores))
           (queue-submit queue 1 submit-info fence))
-        (with-foreign-objects ((present-info '(:struct present-info))
+        (with-foreign-objects ((present-info '(:struct present-info-khr))
                                (wait-semaphores 'semaphore 1)
                                (swapchains 'swapchain 1)
                                (indices :uint32 1))
           (setf (mem-aref wait-semaphores 'semaphore 0) render-finished-sem)
           (setf (mem-aref swapchains 'swapchain 0) swapchain)
           (setf (mem-aref indices :uint32 0) image-index)
-          (setf (mem-ref present-info '(:struct present-info))
-                (list 'stype 1000001001 'next (null-pointer)
-                      'wait-semaphore-count 1 'wait-semaphores wait-semaphores
-                      'swapchain-count 1 'swapchains swapchains
-                      'image-indices indices 'results (null-pointer)))
+          (setf (mem-ref present-info '(:struct present-info-khr))
+                (list :s-type 1000001001 :next (null-pointer)
+                      :wait-semaphore-count 1 :wait-semaphores wait-semaphores
+                      :swapchain-count 1 :swapchains swapchains
+                      :image-indices indices :results (null-pointer)))
           (queue-present queue present-info)))
       (unless (= (xcb-flush conn) 1)
         (error "xcb_flush"))
