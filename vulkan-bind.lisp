@@ -207,7 +207,7 @@
   `(eval-when (:compile-toplevel :execute)
      (%load-registry ,file)))
 
-(defmacro define-vulkan-func (kind (name vulkan-name) return-type &body args)
+(defmacro define-vulkan-func (kind (name vulkan-name &optional wrap) return-type &body args)
   (multiple-value-bind (var get-pointer-expr)
       (ecase kind
         (:global (values nil `(get-instance-proc-addr (null-pointer) ,vulkan-name)))
@@ -218,7 +218,9 @@
                (body `(let ((pfn ,get-pointer-expr))
                         (eval `(defun ,',name ,',(mapcar #'first args)
                                  (if (eql ,',var ',,var)
-                                     (foreign-funcall-pointer ,pfn () ,@',(mapcan #'reverse args) ,',return-type)
+                                     (let ((result (foreign-funcall-pointer ,pfn () ,@',(mapcan #'reverse args)
+                                                                            ,',return-type)))
+                                       ,',(or wrap 'result))
                                      ,',loopy)))
                         (,name ,@(mapcar #'first args)))))
           (setf (car loopy) (car body)
@@ -298,7 +300,31 @@
                           ("VkDevice" :device)
                           ("VkInstance" :instance)
                           ((m:type string)
-                           (function-kind-for-type (get-attribute (first (gethash type type-table)) "parent"))))))
+                           (function-kind-for-type (get-attribute (first (gethash type type-table)) "parent")))))
+                      (parse-codes-list (str)
+                        (do* ((result ())
+                              (start 0 (1+ (or comma-pos (return (nreverse result)))))
+                              (comma-pos #1=(position #\, str :start start) #1#))
+                             (nil)
+                          (let* ((substr (subseq str start comma-pos))
+                                 (el (gethash substr const-table))
+                                 ;; HACK we should eventually always
+                                 ;; find constants! This is only
+                                 ;; needed because we're not parsing
+                                 ;; extensions yet
+                                 (value (when el (parse-integer (get-attribute el "value")))))
+                            (when value
+                              (push (cons substr value) result)))))
+                      (make-result-wrapper (func-el)
+                        `(ecase result
+                           ,@(mapcar
+                              (lambda (success-code)
+                                `((,(cdr success-code)) ,(intern (subseq (car success-code) 3) :keyword)))
+                              (parse-codes-list (get-attribute func-el "successcodes")))
+                           ,@(mapcar
+                              (lambda (error-code)
+                                `((,(cdr error-code)) (error "~A" ',(car error-code))))
+                              (parse-codes-list (get-attribute func-el "errorcodes"))))))
                (mapcar
                 (lambda (func-name)
                   (let* ((vk-name (vulkanize-func-name func-name tag-table))
@@ -309,8 +335,10 @@
                       (assert (every (lambda (x) (equal (dom:tag-name x) "param")) params))
                       (destructuring-bind (name return-type) (parse-type-decl (extract-contents proto))
                         (assert (equal name vk-name))
-                        `(define-vulkan-func ,(function-kind vk-name params) (,func-name ,vk-name)
-                                             ,(normalize-type return-type)
+                        `(define-vulkan-func ,(function-kind vk-name params)
+                             (,func-name ,vk-name ,@(when (equal return-type "VkResult")
+                                                      `(,(make-result-wrapper func-el))))
+                             ,(normalize-type return-type)
                            ,@(mapcar (lambda (param)
                                        (destructuring-bind (name type) (parse-type-decl (extract-contents param))
                                          `(,(unvulkanize-field-name name type nil) ,(normalize-type type))))

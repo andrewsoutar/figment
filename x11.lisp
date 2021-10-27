@@ -117,8 +117,7 @@
              (setf (mem-aref layers-arr :pointer i) (foreign-string-alloc (svref layers i))))
            (dotimes (i (length extensions))
              (setf (mem-aref extensions-arr :pointer i) (foreign-string-alloc (svref extensions i))))
-           (unless (zerop (%create-instance create-info (null-pointer) instance))
-             (error "vkCreateInstance"))
+           (%create-instance create-info (null-pointer) instance)
            (make-array () :initial-element (mem-ref instance 'instance)))
       (dotimes (i (length layers))
         (let ((ptr (mem-aref layers-arr :pointer i)))
@@ -201,8 +200,7 @@
 
 (defun create-xcb-surface (create-info)
   (with-foreign-object (surface 'surface)
-    (unless (zerop (%create-xcb-surface-khr (aref *instance*) create-info (null-pointer) surface))
-      (error "vkCreateSurfaceKHR"))
+    (%create-xcb-surface-khr (aref *instance*) create-info (null-pointer) surface)
     (mem-ref surface 'surface)))
 
 
@@ -212,26 +210,25 @@
        (with-foreign-object (,count-ptr :uint32)
          (tagbody
             ,retry
-            (unless (zerop (,wrapped-fun ,@parameters ,count-ptr (null-pointer)))
+            (unless (eql (,wrapped-fun ,@parameters ,count-ptr (null-pointer)) :success)
               (error "Error from enumerator ~A" ',wrapped-fun))
             (with-foreign-object (,array ',type (mem-ref ,count-ptr :uint32))
               (let ((,result (,wrapped-fun ,@parameters ,count-ptr ,array)))
                 (case ,result
-                  (0 (return-from ,block (let ((,count (mem-ref ,count-ptr :uint32))) ,@body)))
-                  (5 (go ,retry))
+                  (:success (return-from ,block (let ((,count (mem-ref ,count-ptr :uint32))) ,@body)))
+                  (:incomplete (go ,retry))
                   (t (error "Error from enumerator ~A: ~A" ',wrapped-fun ,result))))))))))
 
 (defctype physical-device vk-dispatchable)
 
 (defun get-physical-device-queue-family-properties (physical-device count array)
   (%get-physical-device-queue-family-properties physical-device count array)
-  0)
+  :success)
 
 
 (defun get-physical-device-surface-support (physical-device queue-family-index surface)
   (with-foreign-object (supported :uint32)
-    (unless (zerop (%get-physical-device-surface-support-khr physical-device queue-family-index surface supported))
-      (error "vkGetPhysicalDeviceSurfaceSupportKHR"))
+    (%get-physical-device-surface-support-khr physical-device queue-family-index surface supported)
     (= 1 (mem-ref supported :uint32))))
 
 
@@ -305,8 +302,7 @@
                  (list :s-type :device-queue-create-info :next (null-pointer) :flags 0
                        :queue-family-index queue :queue-count 1 :queue-priorities priorities))
            (setf (mem-aref priorities :float 0) queue-priority)
-           (unless (zerop (%create-device physical-device device-create-info (null-pointer) device))
-             (error "vkCreateDevice"))
+           (%create-device physical-device device-create-info (null-pointer) device)
            (mem-ref device 'device))
       (dotimes (i (length extensions))
         (let ((ptr (mem-aref extension-names :pointer i)))
@@ -346,8 +342,7 @@
                 :composite-alpha #x00000001 ; VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
                 :present-mode 2         ; VK_PRESENT_MODE_FIFO_KHR
                 :clipped 0 :old-swapchain 0))
-    (unless (zerop (%create-swapchain-khr (aref *device*) create-info (null-pointer) swapchain))
-      (error "vkCreateSwapchainKHR"))
+    (%create-swapchain-khr (aref *device*) create-info (null-pointer) swapchain)
     (mem-ref swapchain 'swapchain)))
 
 (defun destroy-swapchain (swapchain)
@@ -366,8 +361,7 @@
                 :components '(:r 0 :b 0 :g 0 :a 0)
                 :subresource-range '(:aspect-mask #x00000001 :base-mip-level 0 :level-count 1
                                      :base-array-layer 0 :layer-count 1)))
-    (unless (zerop (%create-image-view (aref *device*) create-info (null-pointer) view))
-      (error "vkCreateImageView"))
+    (%create-image-view (aref *device*) create-info (null-pointer) view)
     (mem-ref view 'image-view)))
 
 (defun destroy-image-view (image-view)
@@ -448,8 +442,7 @@
       (setf (mem-ref create-info '(:struct shader-module-create-info))
             (list :s-type :shader-module-create-info :next (null-pointer) :flags 0
                   :code-size (length code) :code code-ptr))
-      (unless (zerop (%create-shader-module (aref *device*) create-info (null-pointer) shader-module))
-        (error "vkCreateShaderModule"))
+      (%create-shader-module (aref *device*) create-info (null-pointer) shader-module)
       (mem-ref shader-module 'shader-module))))
 
 (defun destroy-shader-module (shader-module)
@@ -465,8 +458,7 @@
           (list :s-type :pipeline-layout-create-info :next (null-pointer) :flags 0
                 :set-layout-count 0 :set-layouts (null-pointer)
                 :push-constant-range-count 0 :push-constant-ranges (null-pointer)))
-    (unless (zerop (%create-pipeline-layout (aref *device*) create-info (null-pointer) layout))
-      (error "vkCreatePipelineLayout"))
+    (%create-pipeline-layout (aref *device*) create-info (null-pointer) layout)
     (mem-ref layout 'pipeline-layout)))
 
 (defun destroy-pipeline-layout (pipeline-layout)
@@ -490,8 +482,7 @@
                 :attachment-count (length attachments) :attachments attachments-ptr
                 :subpass-count 1 :subpasses subpass-ptr
                 :dependency-count 0 :dependencies (null-pointer)))
-    (unless (zerop (%create-render-pass (aref *device*) create-info (null-pointer) render-pass))
-      (error "vkCreateRenderPass"))
+    (%create-render-pass (aref *device*) create-info (null-pointer) render-pass)
     (mem-ref render-pass 'render-pass)))
 
 (defun destroy-render-pass (render-pass)
@@ -611,8 +602,7 @@
                                          '(vertex-input-state input-assembly-state viewport-state
                                            rasterization-state multisample-state color-blend-state)))))
 
-      (unless (zerop (%create-graphics-pipelines (aref *device*) 0 1 create-info (null-pointer) pipeline))
-        (error "vkCreateGraphicsPipelines"))
+      (%create-graphics-pipelines (aref *device*) 0 1 create-info (null-pointer) pipeline)
       (mem-ref pipeline 'pipeline))))
 
 
@@ -628,8 +618,7 @@
                 :render-pass render-pass
                 :attachment-count 1 :attachments attachment
                 :width 600 :height 400 :layers 1))
-    (unless (zerop (%create-framebuffer (aref *device*) create-info (null-pointer) framebuffer))
-      (error "vkCreateFramebuffer"))
+    (%create-framebuffer (aref *device*) create-info (null-pointer) framebuffer)
     (mem-ref framebuffer 'framebuffer)))
 
 (defun destroy-framebuffer (framebuffer)
@@ -644,8 +633,7 @@
     (setf (mem-ref create-info '(:struct command-pool-create-info))
           (list :s-type :command-pool-create-info :next (null-pointer) :flags 0
                 :queue-family-index queue-family-index))
-    (unless (zerop (%create-command-pool (aref *device*) create-info (null-pointer) command-pool))
-      (error "vkCreateCommandPool"))
+    (%create-command-pool (aref *device*) create-info (null-pointer) command-pool)
     (mem-ref command-pool 'command-pool)))
 
 (defun destroy-command-pool (command-pool)
@@ -659,8 +647,7 @@
     (setf (mem-ref allocate-info '(:struct command-buffer-allocate-info))
           (list :s-type :command-buffer-allocate-info :next (null-pointer)
                 :command-pool command-pool :level 0 :command-buffer-count n-command-buffers))
-    (unless (zerop (%allocate-command-buffers (aref *device*) allocate-info command-buffers))
-      (error "vkAllocateCommandBuffers"))))
+    (%allocate-command-buffers (aref *device*) allocate-info command-buffers)))
 
 (defun free-command-buffers (command-pool command-buffers n-command-buffers)
   (%free-command-buffers (aref *device*) command-pool n-command-buffers command-buffers))
@@ -803,9 +790,8 @@
     (let ((queue (get-device-queue (aref *device*) queue-family 0))))
     (with-cleanups ((swapchain (multiple-value-bind (min-image-count)
                                    (with-foreign-object (capabilities-p '(:struct surface-capabilities-khr))
-                                     (unless (zerop (get-physical-device-surface-capabilities-khr
-                                                     physical-device surface capabilities-p))
-                                       (error "vkGetPhysicalDeviceSurfaceCapabilitiesKHR"))
+                                     (get-physical-device-surface-capabilities-khr physical-device surface
+                                                                                   capabilities-p)
                                      (let ((capabilities
                                              (mem-ref capabilities-p '(:struct surface-capabilities-khr))))
                                        (values (getf capabilities :min-image-count))))
