@@ -42,8 +42,9 @@
           device-queue-create-info device-create-info
           component-mapping image-subresource-range image-view-type image-view-create-info
           shader-module-create-info pipeline-layout-create-info
+          sample-count-flag-bits
           attachment-reference attachment-description subpass-description render-pass-create-info
-          shader-stage-flags pipeline-shader-stage-create-info pipeline-vertex-input-state-create-info
+          shader-stage-flag-bits pipeline-shader-stage-create-info pipeline-vertex-input-state-create-info
           primitive-topology pipeline-input-assembly-state-create-info viewport pipeline-viewport-state-create-info
           polygon-mode cull-mode-flags front-face
           pipeline-rasterization-state-create-info pipeline-multisample-state-create-info
@@ -432,12 +433,12 @@
     (with-foreign-string (str-main "main")
       (setf (mem-aref stages-info '(:struct pipeline-shader-stage-create-info) 0)
             (list :s-type :pipeline-shader-stage-create-info :next (null-pointer) :flags 0
-                  :stage #x00000001     ; VK_SHADER_STAGE_VERTEX_BIT
+                  :stage :vertex-bit
                   :module vertex-module :name str-main
                   :specialization-info (null-pointer)))
       (setf (mem-aref stages-info '(:struct pipeline-shader-stage-create-info) 1)
             (list :s-type :pipeline-shader-stage-create-info :next (null-pointer) :flags 0
-                  :stage #x00000010     ; VK_SHADER_STAGE_FRAGMENT_BIT
+                  :stage :fragment-bit
                   :module fragment-module :name str-main
                   :specialization-info (null-pointer)))
 
@@ -483,7 +484,7 @@
 
       (setf (mem-ref multisample-state '(:struct pipeline-multisample-state-create-info))
             (list :s-type :pipeline-multisample-state-create-info :next (null-pointer) :flags 0
-                  :rasterization-samples #x00000001 ; VK_SAMPLE_COUNT_1_BIT
+                  :rasterization-samples :1-bit
                   :min-sample-shading 1.0f0
                   :sample-mask (null-pointer)
                   :alpha-to-coverage-enable nil :alpha-to-one-enable nil))
