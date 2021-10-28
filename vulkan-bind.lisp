@@ -40,12 +40,12 @@
                  (let ((hex (match "x"))) (code-char (num (if hex 16 8) :end (unless hex (+ start 3))))))))
     (do* ((tokens ()) (allow-octal t t)) ((or (null start) (>= start (length str))) (nreverse tokens))
      retry
-      (let* ((old-start start) (radix (cond ((match "0x") 16) ((and allow-octal (match "0")) 8) (10)))
+      (let* ((old-start start) (radix (cond ((match "0x") 16) ((and allow-octal (eql (char str start) #\0)) 8) (10)))
              (num (num radix)) frac frac-bias exp (kind :int))
         (when (match ".")
           (when (= radix 8) (setf allow-octal nil start old-start) (go retry))
           (setf frac-bias (expt radix (- start (progn (setf frac (num radix)) start)))))
-        (unless (or num frac) (go skip-number))
+        (unless (or num frac) (setf start old-start) (go skip-number))
         (when (find-if #'match (if (= radix 16) "pP" "eE"))
           (setf exp (* (cond ((match "+") 1) ((match "-") -1) (1)) (num 10))))
         (when (or frac-bias exp)
@@ -72,51 +72,56 @@
             (t (error "Invalid character while tokenizing: '~C'" (char str start))))
      again)))
 
-(defun parse-type-decl (decl)
-  "Parse a C type declaration"
-  (let ((tokens (c-tokenize decl)))
+(defvar *parser-tokens*)
+(macrolet ((maybe-tokens (&body body)
+             (with-gensyms (new-tokens)
+               `(let (,new-tokens)
+                  (multiple-value-prog1
+                      (let ((*parser-tokens* *parser-tokens*))
+                        (multiple-value-prog1 (block nil ,@body)
+                          (setf ,new-tokens *parser-tokens*)))
+                    (setf *parser-tokens* ,new-tokens)))))
+           (match-token-or-fail (&body matchers)
+             `(match-case (pop *parser-tokens*) ,@matchers (t (throw 'parse-fail nil)))))
+  (defun parse-expression (&optional (input nil input-p))
+    (when input-p (return-from parse-expression (let ((*parser-tokens* (c-tokenize input))) (parse-expression))))
+    (maybe-tokens
+     (match-token-or-fail
+      (((m:or :int :float :double :long-double :literal) lit) lit)
+      ((:ident var) `(:var ,var)))))
+  (defun parse-type-decl (&optional (input nil input-p))
+    "Parse a C type declaration"
     ;; This doesn't (yet) support function pointers. It only supports
     ;; const as a qualifier. It only supports the declaration of a
     ;; single identifier.
-    (macrolet ((maybe-tokens (&body body)
-                 (with-gensyms (old-tokens done)
-                   `(let ((,old-tokens tokens) ,done)
-                      (unwind-protect (multiple-value-prog1 (block nil ,@body) (setf ,done t))
-                        (unless ,done (setf tokens ,old-tokens))))))
-               (match-token-or-fail (&body matchers)
-                 `(match-case (pop tokens) ,@matchers (t (throw 'parse-fail nil)))))
-      (labels ((parse-qualifier () (maybe-tokens (match-token-or-fail ((:ident "const") :const))))
-               (parse-expression ()
-                 (maybe-tokens
-                  (match-token-or-fail
-                   (((m:or :int :float :double :long-double :literal) lit) lit)
-                   ((:ident var) `(:var ,var)))))
-               (parse-declaration ()
-                 (maybe-tokens
-                  (multiple-value-bind (name type-thunk)
-                      (match-token-or-fail
-                       ((:punc "*")
-                        (let ((quals (make-array '(1) :adjustable t :fill-pointer 0)))
-                          (catch 'parse-fail (loop (vector-push-extend (parse-qualifier) quals)))
-                          (multiple-value-bind (name inner-decl) (parse-declaration)
-                            (return (values name (lambda (type) (funcall inner-decl `(:pointer ,type))))))))
-                       ((:punc "(") (multiple-value-prog1 (parse-declaration) (match-token-or-fail ((:ident ")")))))
-                       ((:ident name) (values name #'identity)))
-                    (catch 'parse-fail
-                      (loop
-                        (maybe-tokens
-                         (match-token-or-fail
-                          ((:punc "[")
-                           (let ((len (prog1 (parse-expression) (match-token-or-fail ((:punc "]")))))
-                                 (old-type-thunk type-thunk))
-                             (setf type-thunk (lambda (type) (funcall old-type-thunk `(:array ,type ,len))))))))))
-                    (values name type-thunk)))))
-        (let ((type (loop (match-token-or-fail
-                           ((:ident "const"))
-                           ((:ident type) (return type))))))
-          (multiple-value-bind (name type-thunk) (parse-declaration)
-            (unless (endp tokens) (throw 'parse-fail nil))
-            (return-from parse-type-decl `(,name ,(funcall type-thunk type)))))))))
+    (when input-p (return-from parse-type-decl (let ((*parser-tokens* (c-tokenize input))) (parse-type-decl))))
+    (labels ((parse-qualifier () (maybe-tokens (match-token-or-fail ((:ident "const") :const))))
+             (parse-declaration ()
+               (maybe-tokens
+                (multiple-value-bind (name type-thunk)
+                    (match-token-or-fail
+                     ((:punc "*")
+                      (let ((quals (make-array '(1) :adjustable t :fill-pointer 0)))
+                        (catch 'parse-fail (loop (vector-push-extend (parse-qualifier) quals)))
+                        (multiple-value-bind (name inner-decl) (parse-declaration)
+                          (return (values name (lambda (type) (funcall inner-decl `(:pointer ,type))))))))
+                     ((:punc "(") (multiple-value-prog1 (parse-declaration) (match-token-or-fail ((:ident ")")))))
+                     ((:ident name) (values name #'identity)))
+                  (catch 'parse-fail
+                    (loop
+                      (maybe-tokens
+                       (match-token-or-fail
+                        ((:punc "[")
+                         (let ((len (prog1 (parse-expression) (match-token-or-fail ((:punc "]")))))
+                               (old-type-thunk type-thunk))
+                           (setf type-thunk (lambda (type) (funcall old-type-thunk `(:array ,type ,len))))))))))
+                  (values name type-thunk)))))
+      (let ((type (loop (match-token-or-fail
+                         ((:ident "const"))
+                         ((:ident type) (return type))))))
+        (multiple-value-bind (name type-thunk) (parse-declaration)
+          (unless (endp *parser-tokens*) (throw 'parse-fail nil))
+          (return-from parse-type-decl `(,name ,(funcall type-thunk type))))))))
 
 (defun eval-c-expr (expr const-table)
   (match-ecase expr
@@ -145,6 +150,11 @@
     type-like-name))
 (defun vulkanize-enum-value (name)
   (concatenate 'string "VK_" (substitute #\_ #\- (remove #\% (string name)))))
+(defun vulkanize-flag-value (name)
+  (let ((name-string (string name))
+        (suffix "-FLAGS"))
+    (assert (string= name suffix :start1 (- (length name-string) (length suffix))))
+    (vulkanize-enum-value (subseq name-string 0 (- (length name-string) (length suffix))))))
 (defun unvulkanize-field-name (name type package &aux (start 0))
   (do () ((not (and (eql (car (ensure-list type)) :pointer) (eql (char name start) #\p))))
     (incf start)
@@ -253,7 +263,8 @@
                                                                 :test #'equal))
                                           (elem (first (gethash type type-table))))
                                       (match-ecase (get-attribute elem "category")
-                                        ((m:or "enum" "bitmask") (or sym :int))
+                                        ;; FIXME I don't think we necessarily know that it's supposed to be a uint32
+                                        ((m:or "enum" "bitmask") (or sym :uint32))
                                         ("struct" `(:struct ,(or sym (error "Struct ~A does not have a name!" type))))
                                         ("handle"
                                          (or sym
@@ -269,7 +280,7 @@
                   (match-ecase (get-attribute type-elem "category")
                     ("enum"
                      (let ((prefix (concatenate 'string (vulkanize-enum-value type-name) "_")))
-                       `(defcenum ,type-name
+                       `(defcenum (,type-name :uint32)
                           ,@(mapcar (lambda (value)
                                       (assert (equal (dom:tag-name value) "enum"))
                                       (let ((val-name (get-attribute value "name")))
@@ -277,6 +288,25 @@
                                         `(,(intern (nsubstitute #\- #\_ (subseq val-name (length prefix))) :keyword)
                                           ,(parse-integer (get-attribute value "value")))))
                                     (child-elems enums-elem)))))
+                    ("bitmask"
+                     (assert (equal (extract-contents type-elem) (format nil "typedef VkFlags ~A;" vk-name)))
+                     (let* ((prefix (concatenate 'string (vulkanize-flag-value type-name) "_"))
+                            (bits-enum (get-attribute type-elem "requires"))
+                            (bits-elem (when bits-enum (second (gethash bits-enum type-table)))))
+                       (when bits-enum (assert bits-elem))
+                       `(defbitfield (,type-name :uint32)
+                          ,@(mapcar (lambda (value)
+                                      (assert (equal (dom:tag-name value) "enum"))
+                                      (let ((val-name (get-attribute value "name")))
+                                        (assert (string= prefix val-name :end2 (length prefix)))
+                                        `(,(intern (nsubstitute #\- #\_ (subseq val-name (length prefix))) :keyword)
+                                          ,(let ((val-str (get-attribute value "value"))
+                                                 (bitpos (get-attribute value "bitpos")))
+                                             (if val-str
+                                                 (progn (assert (null bitpos))
+                                                        (eval-c-expr (parse-expression val-str) const-table))
+                                                 (ash 1 (eval-c-expr (parse-expression bitpos) const-table)))))))
+                                    (child-elems bits-elem)))))
                     ("struct"
                      `(defcstruct ,type-name
                         ,@(mapcar (lambda (member)

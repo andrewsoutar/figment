@@ -38,20 +38,21 @@
 (gen-vulkan-bindings ()
   (:types structure-type
           offset-2d offset-3d extent-2d extent-3d rect-2d
-          instance-create-info queue-family-properties extension-properties
+          instance-create-info queue-flags queue-family-properties extension-properties
           device-queue-create-info device-create-info
-          component-mapping image-subresource-range image-view-create-info
+          component-mapping image-subresource-range image-view-type image-view-create-info
           shader-module-create-info pipeline-layout-create-info
           attachment-reference attachment-description subpass-description render-pass-create-info
-          pipeline-shader-stage-create-info pipeline-vertex-input-state-create-info
-          pipeline-input-assembly-state-create-info viewport pipeline-viewport-state-create-info
+          shader-stage-flags pipeline-shader-stage-create-info pipeline-vertex-input-state-create-info
+          primitive-topology pipeline-input-assembly-state-create-info viewport pipeline-viewport-state-create-info
+          polygon-mode cull-mode-flags front-face
           pipeline-rasterization-state-create-info pipeline-multisample-state-create-info
           pipeline-color-blend-attachment-state pipeline-color-blend-state-create-info
           graphics-pipeline-create-info framebuffer-create-info command-pool-create-info
           command-buffer-allocate-info command-buffer-begin-info render-pass-begin-info
           semaphore-create-info fence-create-info submit-info
-          xcb-surface-create-info-khr surface-format-khr surface-capabilities-khr
-          swapchain-create-info-khr present-info-khr)
+          image-usage-flags xcb-surface-create-info-khr surface-format-khr surface-capabilities-khr
+          sharing-mode swapchain-create-info-khr present-info-khr)
   (:functions %create-instance %destroy-instance
               enumerate-physical-devices
               %get-physical-device-queue-family-properties
@@ -190,9 +191,8 @@
       (with-enumerated-objects (qf-count qf-array (:struct queue-family-properties))
           (get-physical-device-queue-family-properties physical-device)
         (do-foreign-array ((j qf-ptr) qf-array (:struct queue-family-properties) qf-count :pointerp t)
-          (when (and (logand (foreign-slot-value qf-ptr '(:struct queue-family-properties) :queue-flags)
-                             #x00000001 ; VK_QUEUE_GRAPHICS_BIT
-                             )
+          (when (and (member :graphics-bit
+                             (foreign-slot-value qf-ptr '(:struct queue-family-properties) :queue-flags))
                      (get-physical-device-surface-support physical-device j surface))
             (return-from find-device-queue (values physical-device j)))))
       skip))
@@ -256,8 +256,8 @@
                 :surface surface :min-image-count min-image-count
                 :image-format *image-format* :image-color-space *image-color-space*
                 :image-extent '(:width 600 :height 400) :image-array-layers 1
-                :image-usage #x00000010 ; VK_IMAGE_USE_COLOR_ATTACHMENT_BIT
-                :image-sharing-mode 0
+                :image-usage '(:color-attachment-bit)
+                :image-sharing-mode :exclusive
                 :queue-family-index-count 0 :queue-family-indices (null-pointer)
                 :pre-transform #x00000001  ; VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR
                 :composite-alpha #x00000001 ; VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
@@ -277,7 +277,7 @@
                          (create-info '(:struct image-view-create-info)))
     (setf (mem-ref create-info '(:struct image-view-create-info))
           (list :s-type :image-view-create-info :next (null-pointer) :flags 0
-                :image image :view-type 1 ; VK_IMAGE_VIEW_TYPE_2D
+                :image image :view-type :2d
                 :format *image-format*
                 :components '(:r 0 :b 0 :g 0 :a 0)
                 :subresource-range '(:aspect-mask #x00000001 :base-mip-level 0 :level-count 1
@@ -449,7 +449,7 @@
                   :vertex-attribute-descriptions (null-pointer)))
       (setf (mem-ref input-assembly-state '(:struct pipeline-input-assembly-state-create-info))
             (list :s-type :pipeline-input-assembly-state-create-info :next (null-pointer) :flags 0
-                  :topology 3))  ; VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+                  :topology :triangle-list))
       (setf (foreign-slot-value input-assembly-state '(:struct pipeline-input-assembly-state-create-info)
                                 :primitive-restart-enable)
             nil)
@@ -465,9 +465,9 @@
 
       (setf (mem-ref rasterization-state '(:struct pipeline-rasterization-state-create-info))
             (list :s-type :pipeline-rasterization-state-create-info :next (null-pointer) :flags 0
-                  :polygon-mode 0    ; VK_POLYGON_MODE_FILL
-                  :cull-mode 0       ; VK_CULL_MODE_NONE
-                  :front-face 0      ; VK_FRONT_FACE_COUNTER_CLOCKWISE
+                  :polygon-mode :fill
+                  :cull-mode nil
+                  :front-face :counter-clockwise
                   :depth-bias-constant-factor 0.0f0
                   :depth-bias-clamp 0.0f0 :depth-bias-slope-factor 0.0f0
                   :line-width 1.0f0))
