@@ -29,12 +29,6 @@
 ;;; Vulkan stuff
 (load-registry)
 
-(defctype flags :uint32)
-(defctype vk-result :int)
-
-(defctype vk-dispatchable :pointer)
-(defctype vk-non-dispatchable :uint64)
-
 (uiop:define-package #:com.andrewsoutar.figment/x11/vk
   (:documentation "Vulkan bindings")
   (:use))
@@ -53,49 +47,6 @@
               %create-swapchain-khr %destroy-swapchain-khr
               get-physical-device-surface-capabilities-khr get-swapchain-images-khr acquire-next-image-khr
               queue-present-khr))
-
-#+nil
-(gen-vulkan-bindings ()
-  (:types structure-type
-          offset-2d offset-3d extent-2d extent-3d rect-2d
-          instance-create-info queue-flags queue-family-properties extension-properties
-          device-queue-create-info device-create-info
-          component-mapping image-subresource-range image-view-type image-view-create-info
-          shader-module-create-info pipeline-layout-create-info
-          sample-count-flag-bits
-          attachment-reference attachment-description subpass-description render-pass-create-info
-          shader-stage-flag-bits pipeline-shader-stage-create-info pipeline-vertex-input-state-create-info
-          primitive-topology pipeline-input-assembly-state-create-info viewport pipeline-viewport-state-create-info
-          polygon-mode cull-mode-flags front-face
-          pipeline-rasterization-state-create-info pipeline-multisample-state-create-info
-          pipeline-color-blend-attachment-state pipeline-color-blend-state-create-info
-          graphics-pipeline-create-info framebuffer-create-info command-pool-create-info
-          command-buffer-allocate-info command-buffer-begin-info render-pass-begin-info
-          semaphore-create-info fence-create-info submit-info
-          image-usage-flags xcb-surface-create-info-khr surface-format-khr surface-capabilities-khr
-          sharing-mode swapchain-create-info-khr present-info-khr)
-  (:functions %create-instance %destroy-instance
-              enumerate-physical-devices
-              %get-physical-device-queue-family-properties
-              enumerate-device-extension-properties
-              %create-device %destroy-device %get-device-queue queue-submit queue-wait-idle queue-present-khr
-              %create-image-view %destroy-image-view
-              %create-shader-module %destroy-shader-module
-              %create-pipeline-layout %destroy-pipeline-layout
-              %create-render-pass %destroy-render-pass
-              %destroy-pipeline %create-graphics-pipelines
-              %create-framebuffer %destroy-framebuffer
-              %create-command-pool %destroy-command-pool
-              %allocate-command-buffers %free-command-buffers
-              cmd-begin-render-pass cmd-bind-pipeline cmd-draw cmd-end-render-pass
-              %create-semaphore %destroy-semaphore
-              %create-fence %destroy-fence wait-for-fences reset-fences
-              %destroy-surface-khr %create-xcb-surface-khr
-              %get-physical-device-surface-support-khr
-              get-physical-device-surface-formats-khr
-              get-physical-device-surface-capabilities-khr
-              %create-swapchain-khr %destroy-swapchain-khr get-swapchain-images-khr acquire-next-image-khr
-              %begin-command-buffer end-command-buffer))
 
 
 (defun create-instance (layers extensions)
