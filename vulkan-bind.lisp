@@ -282,7 +282,8 @@
                 (cdr loopy) (cdr body))
           loopy))))
 
-(defun gen-vulkan-bindings (file &rest body)
+(defun gen-vulkan-bindings (tag-table type-table const-table func-table feat-table ext-table &rest body)
+  (declare (ignore feat-table ext-table))
   (multiple-value-bind (imported-types types functions)
       (loop for (kind . names) in body
             when (eql kind :imported-types)
@@ -292,178 +293,176 @@
             when (eql kind :functions)
               append names into functions
             finally (return (values imported-types types functions)))
-    (destructuring-bind (tag-table type-table const-table func-table feat-table ext-table) (gethash file *cache*)
-      (declare (ignore feat-table ext-table))
-      (labels ((normalize-type (type &optional require-type-func)
-                 (match-ecase type
-                   ((:pointer &rest) :pointer)
-                   ((:array inner len) `(:array ,(normalize-type inner) ,(eval-c-expr len const-table)))
-                   ("void" :void)
-                   ("char" :char)
-                   ("float" :float)
-                   ("uint8_t" :uint8)
-                   ("int32_t" :int32)
-                   ("uint32_t" :uint32)
-                   ("uint64_t" :uint64)
-                   ("size_t" :size)
-                   ("VkBool32" `(:boolean :uint32))
-                   ((m:or "xcb_window_t" "xcb_visualid_t") :uint32)
-                   ((m:type string)
-                    (let ((sym (or (find type types :key (lambda (x) (vulkanize-type-name x tag-table))
-                                                    :test #'equal)
-                                   (find type imported-types :key (lambda (x) (vulkanize-type-name x tag-table))
-                                                             :test #'equal)))
-                          (elem (first (gethash type type-table))))
-                      (when (and sym require-type-func) (funcall require-type-func sym))
-                      (match-ecase (get-attribute elem "category")
-                        ;; FIXME I don't think we necessarily know that it's supposed to be a uint32
-                        ("basetype" (assert sym) sym)
-                        ("funcpointer" :pointer)
-                        ((m:or "enum" "bitmask") (or sym :uint32))
-                        ("struct" `(:struct ,(or sym (error "Struct ~A does not have a name!" type))))
-                        ("union" `(:union ,(or sym (error "Union ~A does not have a name!" type))))
-                        ("handle" (assert sym) sym))))))
-               (enumlike-body (elem prefix)
-                 (mapcar (lambda (value)
-                           (assert (equal (dom:tag-name value) "enum"))
-                           (let ((val-name (get-attribute value "name")))
-                             (assert (string= prefix val-name :end2 (length prefix)))
-                             `(,(intern (nsubstitute #\- #\_ (subseq val-name (length prefix))) :keyword)
-                               ,(let ((val-str (get-attribute value "value"))
-                                      (bitpos (get-attribute value "bitpos")))
-                                  (if val-str
-                                      (progn (assert (null bitpos))
-                                             (eval-c-expr (parse-expression (list val-str)) const-table))
-                                      (ash 1 (eval-c-expr (parse-expression (list bitpos)) const-table)))))))
-                         (remove-if (lambda (el) (or (member (dom:tag-name el) '("comment" "unused") :test #'equal)
-                                                     (member (get-attribute el "name")
-                                                             '("VK_STENCIL_FRONT_AND_BACK"
-                                                               "VK_COLORSPACE_SRGB_NONLINEAR_KHR")
-                                                             :test #'equal)))
-                                    (child-elems elem)))))
-        `(progn
-           ,@(let ((type-defn-forms ())
-                   (type-status (make-hash-table)))
-               (labels ((require-type (type-name)
-                          (ecase (gethash type-name type-status)
-                            ((nil))
-                            ((:pending) (error "Type cycle detected: ~A" type-name))
-                            ((:done) (return-from require-type)))
-                          (setf (gethash type-name type-status) :pending)
-                          (match-let* ((vk-name (vulkanize-type-name type-name tag-table))
-                                       ((type-elem enums-elem) (gethash vk-name type-table)))
-                            (match-ecase (get-attribute type-elem "category")
-                              ("basetype"
-                               (match-ecase (mapcan #'c-tokenize (extract-contents type-elem))
-                                 (((:ident "typedef") (:ident type) (:ident name) (:punc ";"))
-                                  (assert (equal name vk-name))
-                                  (push `(defctype ,type-name ,(normalize-type type #'require-type))
-                                        type-defn-forms))))
-                              ("handle"
-                               (let ((base-type
-                                       (match-ecase (extract-contents-str type-elem)
-                                         ((m:equal (format nil "VK_DEFINE_HANDLE(~A)" vk-name)) :pointer)
-                                         ((m:equal (format nil "VK_DEFINE_NON_DISPATCHABLE_HANDLE(~A)" vk-name))
-                                          :uint64))))
-                                 (push `(defctype ,type-name ,base-type) type-defn-forms)))
-                              ("enum"
+    (labels ((normalize-type (type &optional require-type-func)
+               (match-ecase type
+                 ((:pointer &rest) :pointer)
+                 ((:array inner len) `(:array ,(normalize-type inner) ,(eval-c-expr len const-table)))
+                 ("void" :void)
+                 ("char" :char)
+                 ("float" :float)
+                 ("uint8_t" :uint8)
+                 ("int32_t" :int32)
+                 ("uint32_t" :uint32)
+                 ("uint64_t" :uint64)
+                 ("size_t" :size)
+                 ("VkBool32" `(:boolean :uint32))
+                 ((m:or "xcb_window_t" "xcb_visualid_t") :uint32)
+                 ((m:type string)
+                  (let ((sym (or (find type types :key (lambda (x) (vulkanize-type-name x tag-table))
+                                                  :test #'equal)
+                                 (find type imported-types :key (lambda (x) (vulkanize-type-name x tag-table))
+                                                           :test #'equal)))
+                        (elem (first (gethash type type-table))))
+                    (when (and sym require-type-func) (funcall require-type-func sym))
+                    (match-ecase (get-attribute elem "category")
+                      ;; FIXME I don't think we necessarily know that it's supposed to be a uint32
+                      ("basetype" (assert sym) sym)
+                      ("funcpointer" :pointer)
+                      ((m:or "enum" "bitmask") (or sym :uint32))
+                      ("struct" `(:struct ,(or sym (error "Struct ~A does not have a name!" type))))
+                      ("union" `(:union ,(or sym (error "Union ~A does not have a name!" type))))
+                      ("handle" (assert sym) sym))))))
+             (enumlike-body (elem prefix)
+               (mapcar (lambda (value)
+                         (assert (equal (dom:tag-name value) "enum"))
+                         (let ((val-name (get-attribute value "name")))
+                           (assert (string= prefix val-name :end2 (length prefix)))
+                           `(,(intern (nsubstitute #\- #\_ (subseq val-name (length prefix))) :keyword)
+                             ,(let ((val-str (get-attribute value "value"))
+                                    (bitpos (get-attribute value "bitpos")))
+                                (if val-str
+                                    (progn (assert (null bitpos))
+                                           (eval-c-expr (parse-expression (list val-str)) const-table))
+                                    (ash 1 (eval-c-expr (parse-expression (list bitpos)) const-table)))))))
+                       (remove-if (lambda (el) (or (member (dom:tag-name el) '("comment" "unused") :test #'equal)
+                                                   (member (get-attribute el "name")
+                                                           '("VK_STENCIL_FRONT_AND_BACK"
+                                                             "VK_COLORSPACE_SRGB_NONLINEAR_KHR")
+                                                           :test #'equal)))
+                                  (child-elems elem)))))
+      `(progn
+         ,@(let ((type-defn-forms ())
+                 (type-status (make-hash-table)))
+             (labels ((require-type (type-name)
+                        (ecase (gethash type-name type-status)
+                          ((nil))
+                          ((:pending) (error "Type cycle detected: ~A" type-name))
+                          ((:done) (return-from require-type)))
+                        (setf (gethash type-name type-status) :pending)
+                        (match-let* ((vk-name (vulkanize-type-name type-name tag-table))
+                                     ((type-elem enums-elem) (gethash vk-name type-table)))
+                          (match-ecase (get-attribute type-elem "category")
+                            ("basetype"
+                             (match-ecase (mapcan #'c-tokenize (extract-contents type-elem))
+                               (((:ident "typedef") (:ident type) (:ident name) (:punc ";"))
+                                (assert (equal name vk-name))
+                                (push `(defctype ,type-name ,(normalize-type type #'require-type))
+                                      type-defn-forms))))
+                            ("handle"
+                             (let ((base-type
+                                     (match-ecase (extract-contents-str type-elem)
+                                       ((m:equal (format nil "VK_DEFINE_HANDLE(~A)" vk-name)) :pointer)
+                                       ((m:equal (format nil "VK_DEFINE_NON_DISPATCHABLE_HANDLE(~A)" vk-name))
+                                        :uint64))))
+                               (push `(defctype ,type-name ,base-type) type-defn-forms)))
+                            ("enum"
+                             (push
+                              `(defcenum (,type-name :uint32)
+                                 ,@(enumlike-body
+                                    enums-elem
+                                    (if (equal vk-name "VkResult")
+                                        "VK_"
+                                        (concatenate 'string (vulkanize-enum-value type-name tag-table) "_"))))
+                              type-defn-forms))
+                            ("bitmask"
+                             (assert (equal (extract-contents-str type-elem)
+                                            (format nil "typedef VkFlags ~A;" vk-name)))
+                             (let* ((bits-enum (get-attribute type-elem "requires"))
+                                    (bits-elem (when bits-enum (second (gethash bits-enum type-table)))))
+                               (when bits-enum (assert bits-elem))
                                (push
-                                `(defcenum (,type-name :uint32)
-                                   ,@(enumlike-body
-                                      enums-elem
-                                      (if (equal vk-name "VkResult")
-                                          "VK_"
-                                          (concatenate 'string (vulkanize-enum-value type-name tag-table) "_"))))
-                                type-defn-forms))
-                              ("bitmask"
-                               (assert (equal (extract-contents-str type-elem)
-                                              (format nil "typedef VkFlags ~A;" vk-name)))
-                               (let* ((bits-enum (get-attribute type-elem "requires"))
-                                      (bits-elem (when bits-enum (second (gethash bits-enum type-table)))))
-                                 (when bits-enum (assert bits-elem))
-                                 (push
-                                  `(defbitfield (,type-name :uint32)
-                                     ,@(when bits-elem
-                                         (enumlike-body
-                                          bits-elem
-                                          (concatenate 'string
-                                                       (vulkanize-flag-value type-name tag-table) "_"))))
-                                  type-defn-forms)))
-                              ((m:and category (m:or "struct" "union"))
-                               (push
-                                `(,(match-ecase category ("struct" 'defcstruct) ("union" 'defcunion)) ,type-name
-                                  ,@(mapcar (lambda (member)
-                                              (assert (equal (dom:tag-name member) "member"))
-                                              (destructuring-bind (name type)
-                                                  (parse-type-decl (extract-contents member))
-                                                `(,(unvulkanize-field-name name type :keyword)
-                                                  ,(normalize-type type #'require-type))))
-                                            (remove "comment" (child-elems type-elem)
-                                                    :key #'dom:tag-name :test #'equal)))
-                                type-defn-forms))))
-                          (setf (gethash type-name type-status) :done)))
-                 (map () #'require-type types))
-               (nreverse type-defn-forms))
-           ,@(labels ((function-kind (name params)
-                        ;; vkspec 4.1
-                        (if (member name '("vkEnumerateInstanceVersion" "vkEnumerateInstanceExtensionProperties"
-                                           "vkEnumerateInstanceLayerProperties" "vkCreateInstance")
-                                    :test #'equal)
-                            :global
-                            (destructuring-bind (name type) (parse-type-decl (extract-contents (first params)))
-                              (declare (ignore name))
-                              (function-kind-for-type type))))
-                      (function-kind-for-type (type)
-                        (match-ecase type
-                          ("VkDevice" :device)
-                          ("VkInstance" :instance)
-                          ((m:type string)
-                           (function-kind-for-type (get-attribute (first (gethash type type-table)) "parent")))))
-                      (parse-codes-list (str)
-                        (do* ((result ())
-                              (start 0 (1+ (or comma-pos (return (nreverse result)))))
-                              (comma-pos #1=(position #\, str :start start) #1#))
-                             (nil)
-                          (let* ((substr (subseq str start comma-pos))
-                                 (el (gethash substr const-table))
-                                 ;; HACK we should eventually always
-                                 ;; find constants! This is only
-                                 ;; needed because we're not parsing
-                                 ;; extensions yet
-                                 (value (when el (parse-integer (get-attribute el "value")))))
-                            (when value
-                              (push (cons substr value) result)))))
-                      (make-result-wrapper (func-el)
-                        `(ecase result
-                           ,@(mapcar
-                              (lambda (success-code)
-                                `((,(cdr success-code)) ,(intern (subseq (car success-code) 3) :keyword)))
-                              (parse-codes-list (get-attribute func-el "successcodes")))
-                           ,@(mapcar
-                              (lambda (error-code)
-                                `((,(cdr error-code)) (error "~A" ',(car error-code))))
-                              (parse-codes-list (get-attribute func-el "errorcodes"))))))
-               (mapcar
-                (lambda (func-name)
-                  (let* ((vk-name (vulkanize-func-name func-name tag-table))
-                         (func-el (gethash vk-name func-table)))
-                    (destructuring-bind (proto &rest params) (child-elems func-el)
-                      (setf params (remove "implicitexternsyncparams" params :key #'dom:tag-name :test #'equal))
-                      (assert (equal (dom:tag-name proto) "proto"))
-                      (assert (every (lambda (x) (equal (dom:tag-name x) "param")) params))
-                      (destructuring-bind (name return-type) (parse-type-decl (extract-contents proto))
-                        (let ((normalized-return-type (normalize-type return-type)))
-                          (assert (equal name vk-name))
-                          `(define-vulkan-func ,(function-kind vk-name params)
-                               (,func-name ,vk-name ,@(when (equal return-type "VkResult")
-                                                        (setf normalized-return-type :int)
-                                                        `(,(make-result-wrapper func-el))))
-                               ,normalized-return-type
-                             ,@(mapcar (lambda (param)
-                                         (destructuring-bind (name type) (parse-type-decl (extract-contents param))
-                                           `(,(unvulkanize-field-name name type nil) ,(normalize-type type))))
-                                       params)))))))
-                functions)))))))
+                                `(defbitfield (,type-name :uint32)
+                                   ,@(when bits-elem
+                                       (enumlike-body
+                                        bits-elem
+                                        (concatenate 'string
+                                                     (vulkanize-flag-value type-name tag-table) "_"))))
+                                type-defn-forms)))
+                            ((m:and category (m:or "struct" "union"))
+                             (push
+                              `(,(match-ecase category ("struct" 'defcstruct) ("union" 'defcunion)) ,type-name
+                                ,@(mapcar (lambda (member)
+                                            (assert (equal (dom:tag-name member) "member"))
+                                            (destructuring-bind (name type)
+                                                (parse-type-decl (extract-contents member))
+                                              `(,(unvulkanize-field-name name type :keyword)
+                                                ,(normalize-type type #'require-type))))
+                                          (remove "comment" (child-elems type-elem)
+                                                  :key #'dom:tag-name :test #'equal)))
+                              type-defn-forms))))
+                        (setf (gethash type-name type-status) :done)))
+               (map () #'require-type types))
+             (nreverse type-defn-forms))
+         ,@(labels ((function-kind (name params)
+                      ;; vkspec 4.1
+                      (if (member name '("vkEnumerateInstanceVersion" "vkEnumerateInstanceExtensionProperties"
+                                         "vkEnumerateInstanceLayerProperties" "vkCreateInstance")
+                                  :test #'equal)
+                          :global
+                          (destructuring-bind (name type) (parse-type-decl (extract-contents (first params)))
+                            (declare (ignore name))
+                            (function-kind-for-type type))))
+                    (function-kind-for-type (type)
+                      (match-ecase type
+                        ("VkDevice" :device)
+                        ("VkInstance" :instance)
+                        ((m:type string)
+                         (function-kind-for-type (get-attribute (first (gethash type type-table)) "parent")))))
+                    (parse-codes-list (str)
+                      (do* ((result ())
+                            (start 0 (1+ (or comma-pos (return (nreverse result)))))
+                            (comma-pos #1=(position #\, str :start start) #1#))
+                           (nil)
+                        (let* ((substr (subseq str start comma-pos))
+                               (el (gethash substr const-table))
+                               ;; HACK we should eventually always
+                               ;; find constants! This is only
+                               ;; needed because we're not parsing
+                               ;; extensions yet
+                               (value (when el (parse-integer (get-attribute el "value")))))
+                          (when value
+                            (push (cons substr value) result)))))
+                    (make-result-wrapper (func-el)
+                      `(ecase result
+                         ,@(mapcar
+                            (lambda (success-code)
+                              `((,(cdr success-code)) ,(intern (subseq (car success-code) 3) :keyword)))
+                            (parse-codes-list (get-attribute func-el "successcodes")))
+                         ,@(mapcar
+                            (lambda (error-code)
+                              `((,(cdr error-code)) (error "~A" ',(car error-code))))
+                            (parse-codes-list (get-attribute func-el "errorcodes"))))))
+             (mapcar
+              (lambda (func-name)
+                (let* ((vk-name (vulkanize-func-name func-name tag-table))
+                       (func-el (gethash vk-name func-table)))
+                  (destructuring-bind (proto &rest params) (child-elems func-el)
+                    (setf params (remove "implicitexternsyncparams" params :key #'dom:tag-name :test #'equal))
+                    (assert (equal (dom:tag-name proto) "proto"))
+                    (assert (every (lambda (x) (equal (dom:tag-name x) "param")) params))
+                    (destructuring-bind (name return-type) (parse-type-decl (extract-contents proto))
+                      (let ((normalized-return-type (normalize-type return-type)))
+                        (assert (equal name vk-name))
+                        `(define-vulkan-func ,(function-kind vk-name params)
+                             (,func-name ,vk-name ,@(when (equal return-type "VkResult")
+                                                      (setf normalized-return-type :int)
+                                                      `(,(make-result-wrapper func-el))))
+                             ,normalized-return-type
+                           ,@(mapcar (lambda (param)
+                                       (destructuring-bind (name type) (parse-type-decl (extract-contents param))
+                                         `(,(unvulkanize-field-name name type nil) ,(normalize-type type))))
+                                     params)))))))
+              functions))))))
 
 (defmacro gen-bindings ((package-name &optional (file *vulkan-file*)) &body features-and-extensions)
   (multiple-value-bind (features extensions)
@@ -474,11 +473,10 @@
               append names into extensions
             finally (return (values features extensions)))
     (destructuring-bind (tag-table type-table const-table func-table feat-table ext-table) (gethash file *cache*)
-      (declare (ignore const-table func-table))
       (let ((package (or (find-package package-name) (make-package package-name)))
             (syms ()))
         `(progn
-           ,(apply #'gen-vulkan-bindings file
+           ,(apply #'gen-vulkan-bindings tag-table type-table const-table func-table feat-table ext-table
                    (mapcan
                     (lambda (require-elem)
                       (assert (equal (dom:tag-name require-elem) "require"))
