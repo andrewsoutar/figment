@@ -3,7 +3,7 @@
   (:local-nicknames (#:m #:com.andrewsoutar.matcher/matchers))
   (:import-from #:cxml)
   (:import-from #:cxml-dom)
-  (:export #:load-registry #:gen-bindings))
+  (:export #:gen-bindings))
 (cl:in-package #:com.andrewsoutar.figment/vulkan-bind)
 
 (defun extract-contents (node)
@@ -197,13 +197,9 @@
        ((null end) (if package (intern temp package) (make-symbol temp)))))
 
 (defparameter *vulkan-file* #p"/usr/share/vulkan/registry/vk.xml")
-(defvar *cache* (make-hash-table :test 'equal))
 
-(defun %load-registry (&optional (file *vulkan-file*))
-  (multiple-value-bind (root truename)
-      (with-open-file (stream file :direction :input :element-type '(unsigned-byte 8))
-        (values (dom:document-element (cxml:parse-stream stream (cxml-dom:make-dom-builder)))
-                (progn (close stream) (truename stream))))
+(defun load-registry (file)
+  (let ((root (dom:document-element (cxml:parse-file file (cxml-dom:make-dom-builder)))))
     (assert (equal (dom:tag-name root) "registry"))
     (let ((tag-table (make-hash-table :test 'equal))
           (type-table (make-hash-table :test 'equal))
@@ -254,13 +250,8 @@
              (let ((name (get-attribute extension-elem "name")))
                (assert name)
                (assert (null (shiftf (gethash name ext-table) extension-elem))))))))
-      (setf (gethash file *cache*)
-            (setf (gethash truename *cache*)
-                  (list tag-table type-table const-table func-table feat-table ext-table))))
-    truename))
-(defmacro load-registry (&optional (file '*vulkan-file*))
-  `(eval-when (:compile-toplevel :execute)
-     (%load-registry ,file)))
+      (values tag-table type-table const-table func-table feat-table ext-table))))
+
 
 (defmacro define-vulkan-func (kind (name vulkan-name &optional wrap) return-type &body args)
   (multiple-value-bind (var get-pointer-expr)
@@ -472,7 +463,7 @@
             when (eql kind :extensions)
               append names into extensions
             finally (return (values features extensions)))
-    (destructuring-bind (tag-table type-table const-table func-table feat-table ext-table) (gethash file *cache*)
+    (multiple-value-bind (tag-table type-table const-table func-table feat-table ext-table) (load-registry file)
       (let ((package (or (find-package package-name) (make-package package-name)))
             (syms ()))
         `(progn

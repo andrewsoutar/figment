@@ -27,8 +27,6 @@
 
 
 ;;; Vulkan stuff
-(load-registry)
-
 (uiop:define-package #:com.andrewsoutar.figment/x11/vk
   (:documentation "Vulkan bindings")
   (:use))
