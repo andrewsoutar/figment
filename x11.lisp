@@ -35,19 +35,8 @@
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (uiop:add-package-local-nickname '#:vk '#:com.andrewsoutar.figment/x11/vk '#.(package-name *package*)))
 (gen-bindings (#:vk)
-  (:features "VK_VERSION_1_0"))
-
-(gen-vulkan-bindings ()
-  (:imported-types vk:instance vk:physical-device vk:extent-2d vk:device vk:semaphore vk:fence vk:queue
-                   vk:image-usage-flags vk:sharing-mode)
-  (:types surface-khr surface-format-khr swapchain-khr swapchain-create-info-khr
-          xcb-surface-create-info-khr surface-capabilities-khr present-info-khr)
-  (:functions %destroy-surface-khr %create-xcb-surface-khr
-              %get-physical-device-surface-support-khr
-              get-physical-device-surface-formats-khr
-              %create-swapchain-khr %destroy-swapchain-khr
-              get-physical-device-surface-capabilities-khr get-swapchain-images-khr acquire-next-image-khr
-              queue-present-khr))
+  (:features "VK_VERSION_1_0")
+  (:extensions "VK_KHR_surface" "VK_KHR_swapchain" "VK_KHR_xcb_surface"))
 
 
 (defun create-instance (layers extensions)
@@ -85,12 +74,12 @@
      ,@body))
 
 (defun destroy-surface (surface)
-  (%destroy-surface-khr (aref *instance*) surface (null-pointer)))
+  (vk:destroy-surface-khr (aref *instance*) surface (null-pointer)))
 
 (defun create-xcb-surface (create-info)
-  (with-foreign-object (surface 'surface-khr)
-    (%create-xcb-surface-khr (aref *instance*) create-info (null-pointer) surface)
-    (mem-ref surface 'surface-khr)))
+  (with-foreign-object (surface 'vk:surface-khr)
+    (vk:create-xcb-surface-khr (aref *instance*) create-info (null-pointer) surface)
+    (mem-ref surface 'vk:surface-khr)))
 
 
 (defmacro with-enumerated-objects ((count array type) (wrapped-fun &rest parameters) &body body)
@@ -115,7 +104,7 @@
 
 (defun get-physical-device-surface-support (physical-device queue-family-index surface)
   (with-foreign-object (supported :uint32)
-    (%get-physical-device-surface-support-khr physical-device queue-family-index surface supported)
+    (vk:get-physical-device-surface-support-khr physical-device queue-family-index surface supported)
     (= 1 (mem-ref supported :uint32))))
 
 
@@ -128,8 +117,8 @@
            (tagbody ,@body))))))
 
 
-(defparameter *image-format* 50)
-(defparameter *image-color-space* 0)
+(defparameter *image-format* :B8G8R8A8-srgb)
+(defparameter *image-color-space* :srgb-nonlinear-khr)
 
 (defun find-device-queue (surface)
   (with-enumerated-objects (pd-count pd-array vk:physical-device)
@@ -146,9 +135,9 @@
                              (return t))))
                        #("VK_KHR_swapchain"))
           (go skip)))
-      (with-enumerated-objects (fmt-count fmt-array (:struct surface-format-khr))
-          (get-physical-device-surface-formats-khr physical-device surface)
-        (unless (do-foreign-array (fmt fmt-array (:struct surface-format-khr) fmt-count)
+      (with-enumerated-objects (fmt-count fmt-array (:struct vk:surface-format-khr))
+          (vk:get-physical-device-surface-formats-khr physical-device surface)
+        (unless (do-foreign-array (fmt fmt-array (:struct vk:surface-format-khr) fmt-count)
                   (when (and (eql (getf fmt :format) *image-format*)
                              (eql (getf fmt :color-space) *image-color-space*))
                     (return t)))
@@ -205,9 +194,9 @@
 
 
 (defun create-swapchain (surface &key min-image-count)
-  (with-foreign-objects ((swapchain 'swapchain-khr)
-                         (create-info '(:struct swapchain-create-info-khr)))
-    (setf (mem-ref create-info '(:struct swapchain-create-info-khr))
+  (with-foreign-objects ((swapchain 'vk:swapchain-khr)
+                         (create-info '(:struct vk:swapchain-create-info-khr)))
+    (setf (mem-ref create-info '(:struct vk:swapchain-create-info-khr))
           (list :s-type 1000001000 :next (null-pointer) :flags 0
                 :surface surface :min-image-count min-image-count
                 :image-format *image-format* :image-color-space *image-color-space*
@@ -219,11 +208,11 @@
                 :composite-alpha #x00000001 ; VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
                 :present-mode 2         ; VK_PRESENT_MODE_FIFO_KHR
                 :clipped 0 :old-swapchain 0))
-    (%create-swapchain-khr (aref *device*) create-info (null-pointer) swapchain)
-    (mem-ref swapchain 'swapchain-khr)))
+    (vk:create-swapchain-khr (aref *device*) create-info (null-pointer) swapchain)
+    (mem-ref swapchain 'vk:swapchain-khr)))
 
 (defun destroy-swapchain (swapchain)
-  (%destroy-swapchain-khr (aref *device*) swapchain (null-pointer)))
+  (vk:destroy-swapchain-khr (aref *device*) swapchain (null-pointer)))
 
 
 (defun create-image-view (image)
@@ -565,8 +554,8 @@
         (unless (= (xcb-flush conn) 1)
           (error "xcb_flush"))))
     (with-instance (#("VK_LAYER_KHRONOS_validation") #("VK_KHR_surface" "VK_KHR_xcb_surface")))
-    (with-cleanups ((surface (with-foreign-object (create-info '(:struct xcb-surface-create-info-khr))
-                               (setf (mem-ref create-info '(:struct xcb-surface-create-info-khr))
+    (with-cleanups ((surface (with-foreign-object (create-info '(:struct vk:xcb-surface-create-info-khr))
+                               (setf (mem-ref create-info '(:struct vk:xcb-surface-create-info-khr))
                                      (list :s-type 1000005000 :next (null-pointer)
                                            :flags 0 :connection conn :window win))
                                (create-xcb-surface create-info))
@@ -578,15 +567,16 @@
     (with-device (create-device physical-device queue-family :extensions #("VK_KHR_swapchain") :queue-priority 1.0f0))
     (let ((queue (get-device-queue (aref *device*) queue-family 0))))
     (with-cleanups ((swapchain (multiple-value-bind (min-image-count)
-                                   (with-foreign-object (capabilities-p '(:struct surface-capabilities-khr))
-                                     (get-physical-device-surface-capabilities-khr physical-device surface
-                                                                                   capabilities-p)
+                                   (with-foreign-object (capabilities-p '(:struct vk:surface-capabilities-khr))
+                                     (vk:get-physical-device-surface-capabilities-khr physical-device surface
+                                                                                      capabilities-p)
                                      (let ((capabilities
-                                             (mem-ref capabilities-p '(:struct surface-capabilities-khr))))
+                                             (mem-ref capabilities-p '(:struct vk:surface-capabilities-khr))))
                                        (values (getf capabilities :min-image-count))))
                                  (create-swapchain surface :min-image-count (1+ min-image-count)))
                                #'destroy-swapchain)))
-    (let ((images (with-enumerated-objects (count array vk:image) (get-swapchain-images-khr (aref *device*) swapchain)
+    (let ((images (with-enumerated-objects (count array vk:image)
+                      (vk:get-swapchain-images-khr (aref *device*) swapchain)
                     (let ((a (make-array count)))
                       (dotimes (i count) (setf (aref a i) (mem-aref array 'vk:image i)))
                       a)))))
@@ -648,8 +638,8 @@
              (error "xcb_flush")))
     (loop
       (let ((image-index (with-foreign-object (img :uint32)
-                           (acquire-next-image-khr (aref *device*) swapchain (1- (ash 1 64))
-                                                   image-available-sem 0 img)
+                           (vk:acquire-next-image-khr (aref *device*) swapchain (1- (ash 1 64))
+                                                      image-available-sem 0 img)
                            (mem-ref img :uint32))))
         (with-foreign-objects ((submit-info '(:struct vk:submit-info) 1)
                                (wait-semaphores 'vk:semaphore 1)
@@ -664,19 +654,19 @@
                       :command-buffer-count 1 :command-buffers (mem-aptr cmd-bufs 'vk:command-buffer image-index)
                       :signal-semaphore-count 1 :signal-semaphores signal-semaphores))
           (vk:queue-submit queue 1 submit-info fence))
-        (with-foreign-objects ((present-info '(:struct present-info-khr))
+        (with-foreign-objects ((present-info '(:struct vk:present-info-khr))
                                (wait-semaphores 'vk:semaphore 1)
-                               (swapchains 'swapchain-khr 1)
+                               (swapchains 'vk:swapchain-khr 1)
                                (indices :uint32 1))
           (setf (mem-aref wait-semaphores 'vk:semaphore 0) render-finished-sem)
-          (setf (mem-aref swapchains 'swapchain-khr 0) swapchain)
+          (setf (mem-aref swapchains 'vk:swapchain-khr 0) swapchain)
           (setf (mem-aref indices :uint32 0) image-index)
-          (setf (mem-ref present-info '(:struct present-info-khr))
+          (setf (mem-ref present-info '(:struct vk:present-info-khr))
                 (list :s-type 1000001001 :next (null-pointer)
                       :wait-semaphore-count 1 :wait-semaphores wait-semaphores
                       :swapchain-count 1 :swapchains swapchains
                       :image-indices indices :results (null-pointer)))
-          (queue-present-khr queue present-info)))
+          (vk:queue-present-khr queue present-info)))
       (unless (= (xcb-flush conn) 1)
         (error "xcb_flush"))
       (with-foreign-object (fences 'vk:fence 1)

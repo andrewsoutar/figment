@@ -155,14 +155,15 @@
   (assert (string= name "Vk" :end1 2))
   (do ((pos 2 (1+ pos))
        (temp (make-array '(16) :element-type 'character :adjustable t :fill-pointer 0)))
-      ((= pos (length name))
+      ((>= pos (length name))
        (if package (intern (coerce temp 'string) package) (make-symbol (coerce temp 'string))))
-    (when (gethash (subseq name pos) tag-table)
-      (setf temp (format nil "~A-~A" (coerce temp 'string) (subseq name pos)))
-      (setf pos (length name)))
-    (when (and (>= pos 3) (not (lower-case-p (char name pos))) (alpha-char-p (char name (1- pos))))
-      (vector-push-extend #\- temp))
-    (vector-push-extend (char-upcase (char name pos)) temp)))
+    (if (gethash (subseq name pos) tag-table)
+        (setf temp (format nil "~A-~A" (coerce temp 'string) (subseq name pos))
+              pos (length name))
+        (progn
+          (when (and (>= pos 3) (not (lower-case-p (char name pos))) (alpha-char-p (char name (1- pos))))
+            (vector-push-extend #\- temp))
+          (vector-push-extend (char-upcase (char name pos)) temp)))))
 (defun unvulkanize-func-name (name tag-table package)
   (let ((copy (copy-sequence 'string name)))
     (assert (eql (char copy 0) #\v))
@@ -173,13 +174,15 @@
   (let ((type-like-name (vulkanize-type-name name tag-table)))
     (setf (char type-like-name 0) #\v)
     type-like-name))
-(defun vulkanize-enum-value (name)
+(defun vulkanize-enum-value (name tag-table)
+  (setf (values name) (vulkan-tag-split name tag-table))
   (setf name (string name))
   (let ((suffix "-FLAG-BITS"))
     (when (and (>= (length name) (length suffix)) (string= name suffix :start1 (- (length name) (length suffix))))
       (setf name (subseq name 0 (- (length name) (length suffix))))))
   (concatenate 'string "VK_" (substitute #\_ #\- (remove #\% (string name)))))
-(defun vulkanize-flag-value (name)
+(defun vulkanize-flag-value (name tag-table)
+  (setf (values name) (vulkan-tag-split name tag-table))
   (setf name (string name))
   (let ((suffix "-FLAGS"))
     (assert (string= name suffix :start1 (- (length name) (length suffix))))
@@ -206,7 +209,8 @@
           (type-table (make-hash-table :test 'equal))
           (const-table (make-hash-table :test 'equal))
           (func-table (make-hash-table :test 'equal))
-          (feat-table (make-hash-table :test 'equal)))
+          (feat-table (make-hash-table :test 'equal))
+          (ext-table (make-hash-table :test 'equal)))
       (dolist (toplevel-child (child-elems root))
         (match-case (dom:tag-name toplevel-child)
           ("tags"
@@ -243,9 +247,16 @@
           ("feature"
            (let ((name (get-attribute toplevel-child "name")))
              (assert name)
-             (assert (null (shiftf (gethash name feat-table) toplevel-child)))))))
+             (assert (null (shiftf (gethash name feat-table) toplevel-child)))))
+          ("extensions"
+           (dolist (extension-elem (child-elems toplevel-child))
+             (assert (equal (dom:tag-name extension-elem) "extension"))
+             (let ((name (get-attribute extension-elem "name")))
+               (assert name)
+               (assert (null (shiftf (gethash name ext-table) extension-elem))))))))
       (setf (gethash file *cache*)
-            (setf (gethash truename *cache*) (list tag-table type-table const-table func-table feat-table))))
+            (setf (gethash truename *cache*)
+                  (list tag-table type-table const-table func-table feat-table ext-table))))
     truename))
 (defmacro load-registry (&optional (file '*vulkan-file*))
   `(eval-when (:compile-toplevel :execute)
@@ -281,8 +292,8 @@
             when (eql kind :functions)
               append names into functions
             finally (return (values imported-types types functions)))
-    (destructuring-bind (tag-table type-table const-table func-table feat-table) (gethash file *cache*)
-      (declare (ignore feat-table))
+    (destructuring-bind (tag-table type-table const-table func-table feat-table ext-table) (gethash file *cache*)
+      (declare (ignore feat-table ext-table))
       (labels ((normalize-type (type &optional require-type-func)
                  (match-ecase type
                    ((:pointer &rest) :pointer)
@@ -296,7 +307,7 @@
                    ("uint64_t" :uint64)
                    ("size_t" :size)
                    ("VkBool32" `(:boolean :uint32))
-                   ("xcb_window_t" :uint32)
+                   ((m:or "xcb_window_t" "xcb_visualid_t") :uint32)
                    ((m:type string)
                     (let ((sym (or (find type types :key (lambda (x) (vulkanize-type-name x tag-table))
                                                     :test #'equal)
@@ -325,7 +336,10 @@
                                              (eval-c-expr (parse-expression (list val-str)) const-table))
                                       (ash 1 (eval-c-expr (parse-expression (list bitpos)) const-table)))))))
                          (remove-if (lambda (el) (or (member (dom:tag-name el) '("comment" "unused") :test #'equal)
-                                                     (equal (get-attribute el "name") "VK_STENCIL_FRONT_AND_BACK")))
+                                                     (member (get-attribute el "name")
+                                                             '("VK_STENCIL_FRONT_AND_BACK"
+                                                               "VK_COLORSPACE_SRGB_NONLINEAR_KHR")
+                                                             :test #'equal)))
                                     (child-elems elem)))))
         `(progn
            ,@(let ((type-defn-forms ())
@@ -355,10 +369,11 @@
                               ("enum"
                                (push
                                 `(defcenum (,type-name :uint32)
-                                   ,@(enumlike-body enums-elem
-                                                    (if (equal vk-name "VkResult")
-                                                        "VK_"
-                                                        (concatenate 'string (vulkanize-enum-value type-name) "_"))))
+                                   ,@(enumlike-body
+                                      enums-elem
+                                      (if (equal vk-name "VkResult")
+                                          "VK_"
+                                          (concatenate 'string (vulkanize-enum-value type-name tag-table) "_"))))
                                 type-defn-forms))
                               ("bitmask"
                                (assert (equal (extract-contents-str type-elem)
@@ -369,9 +384,10 @@
                                  (push
                                   `(defbitfield (,type-name :uint32)
                                      ,@(when bits-elem
-                                         (enumlike-body bits-elem
-                                                        (concatenate 'string
-                                                                     (vulkanize-flag-value type-name) "_"))))
+                                         (enumlike-body
+                                          bits-elem
+                                          (concatenate 'string
+                                                       (vulkanize-flag-value type-name tag-table) "_"))))
                                   type-defn-forms)))
                               ((m:and category (m:or "struct" "union"))
                                (push
@@ -457,9 +473,7 @@
             when (eql kind :extensions)
               append names into extensions
             finally (return (values features extensions)))
-    (assert (and features (endp (rest features))))
-    (assert (endp extensions))
-    (destructuring-bind (tag-table type-table const-table func-table feat-table) (gethash file *cache*)
+    (destructuring-bind (tag-table type-table const-table func-table feat-table ext-table) (gethash file *cache*)
       (declare (ignore const-table func-table))
       (let ((package (or (find-package package-name) (make-package package-name)))
             (syms ()))
@@ -481,11 +495,14 @@
                                 ("enum")
                                 ("command" (let ((type-name (unvulkanize-func-name name tag-table package)))
                                              (push type-name syms)
-                                             `((:functions ,type-name)))))))
+                                             `((:functions ,type-name))))
+                                ("comment"))))
                           (child-elems require-elem)))
-                (child-elems (gethash (first features) feat-table))))
+                (mappend #'child-elems
+                         (nconc (mapcar (lambda (feature) (gethash feature feat-table)) features)
+                                (mapcar (lambda (extension) (gethash extension ext-table)) extensions)))))
            (eval-when (:compile-toplevel :load-toplevel :execute) (export ',(nreverse syms) ',package-name))
-           ',package)))))
+           (find-package ',(package-name package)))))))
 
 
 ;;; FIXME this stuff probably shouldn't be here
