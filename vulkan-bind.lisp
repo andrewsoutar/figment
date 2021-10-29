@@ -3,7 +3,7 @@
   (:local-nicknames (#:m #:com.andrewsoutar.matcher/matchers))
   (:import-from #:cxml)
   (:import-from #:cxml-dom)
-  (:export #:load-registry #:gen-vulkan-bindings #:gen-bindings))
+  (:export #:load-registry #:gen-bindings))
 (cl:in-package #:com.andrewsoutar.figment/vulkan-bind)
 
 (defun extract-contents (node)
@@ -282,7 +282,7 @@
                 (cdr loopy) (cdr body))
           loopy))))
 
-(defmacro gen-vulkan-bindings ((&optional (file *vulkan-file*)) &body body)
+(defun gen-vulkan-bindings (file &rest body)
   (multiple-value-bind (imported-types types functions)
       (loop for (kind . names) in body
             when (eql kind :imported-types)
@@ -478,29 +478,29 @@
       (let ((package (or (find-package package-name) (make-package package-name)))
             (syms ()))
         `(progn
-           (gen-vulkan-bindings (,file)
-             ,@(mapcan
-                (lambda (require-elem)
-                  (assert (equal (dom:tag-name require-elem) "require"))
-                  (mapcan (lambda (required-thing)
-                            (let ((name (get-attribute required-thing "name")))
-                              (match-ecase (dom:tag-name required-thing)
-                                ("type"
-                                 (when-let (elem (first (gethash name type-table)))
-                                   (unless (or (equal (get-attribute elem "category") "define")
-                                               (and (>= (length name) 4) (string= name "PFN_" :end1 4)))
-                                     (let ((type-name (unvulkanize-type-name name tag-table package)))
-                                       (push type-name syms)
-                                       `((:types ,type-name))))))
-                                ("enum")
-                                ("command" (let ((type-name (unvulkanize-func-name name tag-table package)))
-                                             (push type-name syms)
-                                             `((:functions ,type-name))))
-                                ("comment"))))
-                          (child-elems require-elem)))
-                (mappend #'child-elems
-                         (nconc (mapcar (lambda (feature) (gethash feature feat-table)) features)
-                                (mapcar (lambda (extension) (gethash extension ext-table)) extensions)))))
+           ,(apply #'gen-vulkan-bindings file
+                   (mapcan
+                    (lambda (require-elem)
+                      (assert (equal (dom:tag-name require-elem) "require"))
+                      (mapcan (lambda (required-thing)
+                                (let ((name (get-attribute required-thing "name")))
+                                  (match-ecase (dom:tag-name required-thing)
+                                    ("type"
+                                     (when-let (elem (first (gethash name type-table)))
+                                       (unless (or (equal (get-attribute elem "category") "define")
+                                                   (and (>= (length name) 4) (string= name "PFN_" :end1 4)))
+                                         (let ((type-name (unvulkanize-type-name name tag-table package)))
+                                           (push type-name syms)
+                                           `((:types ,type-name))))))
+                                    ("enum")
+                                    ("command" (let ((type-name (unvulkanize-func-name name tag-table package)))
+                                                 (push type-name syms)
+                                                 `((:functions ,type-name))))
+                                    ("comment"))))
+                              (child-elems require-elem)))
+                    (mappend #'child-elems
+                             (nconc (mapcar (lambda (feature) (gethash feature feat-table)) features)
+                                    (mapcar (lambda (extension) (gethash extension ext-table)) extensions)))))
            (eval-when (:compile-toplevel :load-toplevel :execute) (export ',(nreverse syms) ',package-name))
            (find-package ',(package-name package)))))))
 
