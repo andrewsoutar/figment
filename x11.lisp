@@ -34,7 +34,8 @@
   (:use))
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (uiop:add-package-local-nickname '#:vk '#:com.andrewsoutar.figment/x11/vk '#.(package-name *package*)))
-(gen-feature-bindings #:vk "VK_VERSION_1_0")
+(gen-bindings (#:vk)
+  (:features "VK_VERSION_1_0"))
 
 (gen-vulkan-bindings ()
   (:imported-types vk:instance vk:physical-device vk:extent-2d vk:device vk:semaphore vk:fence vk:queue

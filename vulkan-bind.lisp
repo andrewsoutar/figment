@@ -3,7 +3,7 @@
   (:local-nicknames (#:m #:com.andrewsoutar.matcher/matchers))
   (:import-from #:cxml)
   (:import-from #:cxml-dom)
-  (:export #:load-registry #:gen-vulkan-bindings #:gen-feature-bindings))
+  (:export #:load-registry #:gen-vulkan-bindings #:gen-bindings))
 (cl:in-package #:com.andrewsoutar.figment/vulkan-bind)
 
 (defun extract-contents (node)
@@ -449,34 +449,43 @@
                                        params)))))))
                 functions)))))))
 
-(defmacro gen-feature-bindings (package-name feature &optional (file *vulkan-file*))
-  (destructuring-bind (tag-table type-table const-table func-table feat-table) (gethash file *cache*)
-    (declare (ignore const-table func-table))
-    (let ((package (or (find-package package-name) (make-package package-name)))
-          (syms ()))
-      `(progn
-         (gen-vulkan-bindings (,file)
-           ,@(mapcan
-              (lambda (require-elem)
-                (assert (equal (dom:tag-name require-elem) "require"))
-                (mapcan (lambda (required-thing)
-                          (let ((name (get-attribute required-thing "name")))
-                            (match-ecase (dom:tag-name required-thing)
-                              ("type"
-                               (when-let (elem (first (gethash name type-table)))
-                                 (unless (or (equal (get-attribute elem "category") "define")
-                                             (and (>= (length name) 4) (string= name "PFN_" :end1 4)))
-                                   (let ((type-name (unvulkanize-type-name name tag-table package)))
-                                     (push type-name syms)
-                                     `((:types ,type-name))))))
-                              ("enum")
-                              ("command" (let ((type-name (unvulkanize-func-name name tag-table package)))
-                                           (push type-name syms)
-                                           `((:functions ,type-name)))))))
-                        (child-elems require-elem)))
-              (child-elems (gethash feature feat-table))))
-         (eval-when (:compile-toplevel :load-toplevel :execute) (export ',(nreverse syms) ',package-name))
-         ',feature))))
+(defmacro gen-bindings ((package-name &optional (file *vulkan-file*)) &body features-and-extensions)
+  (multiple-value-bind (features extensions)
+      (loop for (kind . names) in features-and-extensions
+            when (eql kind :features)
+              append names into features
+            when (eql kind :extensions)
+              append names into extensions
+            finally (return (values features extensions)))
+    (assert (and features (endp (rest features))))
+    (assert (endp extensions))
+    (destructuring-bind (tag-table type-table const-table func-table feat-table) (gethash file *cache*)
+      (declare (ignore const-table func-table))
+      (let ((package (or (find-package package-name) (make-package package-name)))
+            (syms ()))
+        `(progn
+           (gen-vulkan-bindings (,file)
+             ,@(mapcan
+                (lambda (require-elem)
+                  (assert (equal (dom:tag-name require-elem) "require"))
+                  (mapcan (lambda (required-thing)
+                            (let ((name (get-attribute required-thing "name")))
+                              (match-ecase (dom:tag-name required-thing)
+                                ("type"
+                                 (when-let (elem (first (gethash name type-table)))
+                                   (unless (or (equal (get-attribute elem "category") "define")
+                                               (and (>= (length name) 4) (string= name "PFN_" :end1 4)))
+                                     (let ((type-name (unvulkanize-type-name name tag-table package)))
+                                       (push type-name syms)
+                                       `((:types ,type-name))))))
+                                ("enum")
+                                ("command" (let ((type-name (unvulkanize-func-name name tag-table package)))
+                                             (push type-name syms)
+                                             `((:functions ,type-name)))))))
+                          (child-elems require-elem)))
+                (child-elems (gethash (first features) feat-table))))
+           (eval-when (:compile-toplevel :load-toplevel :execute) (export ',(nreverse syms) ',package-name))
+           ',package)))))
 
 
 ;;; FIXME this stuff probably shouldn't be here
