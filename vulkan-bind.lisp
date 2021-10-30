@@ -334,7 +334,7 @@
                                         :uint64))))
                                (push `(defctype ,symbol ,base-type) type-defn-forms)))
                             ("enum"
-                             (let ((enum-elems (gethash type-name enum-table)))
+                             (let ((enum-elems (reverse (gethash type-name enum-table))))
                                (push
                                 `(defcenum (,symbol :uint32)
                                    ,@(enumlike-body
@@ -347,7 +347,7 @@
                              (assert (equal (extract-contents-str type-elem)
                                             (format nil "typedef VkFlags ~A;" type-name)))
                              (let* ((bits-enum (get-attribute type-elem "requires"))
-                                    (bits-elems (when bits-enum (gethash bits-enum enum-table))))
+                                    (bits-elems (when bits-enum (reverse (gethash bits-enum enum-table)))))
                                (push
                                 `(defbitfield (,symbol :uint32)
                                    ,@(when bits-elems
