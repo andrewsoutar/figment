@@ -195,7 +195,7 @@
   (with-foreign-objects ((swapchain 'vk:swapchain-khr)
                          (create-info '(:struct vk:swapchain-create-info-khr)))
     (setf (mem-ref create-info '(:struct vk:swapchain-create-info-khr))
-          (list :s-type 1000001000 :next (null-pointer) :flags ()
+          (list :s-type :swapchain-create-info-khr :next (null-pointer) :flags ()
                 :surface surface :min-image-count min-image-count
                 :image-format *image-format* :image-color-space *image-color-space*
                 :image-extent '(:width 600 :height 400) :image-array-layers 1
@@ -555,7 +555,7 @@
     (with-instance (#("VK_LAYER_KHRONOS_validation") #("VK_KHR_surface" "VK_KHR_xcb_surface")))
     (with-cleanups ((surface (with-foreign-object (create-info '(:struct vk:xcb-surface-create-info-khr))
                                (setf (mem-ref create-info '(:struct vk:xcb-surface-create-info-khr))
-                                     (list :s-type 1000005000 :next (null-pointer)
+                                     (list :s-type :xcb-surface-create-info-khr :next (null-pointer)
                                            :flags () :connection conn :window win))
                                (create-xcb-surface create-info))
                              #'destroy-surface)))
@@ -592,7 +592,7 @@
                                     (vector (list :flags () :format *image-format* :samples :1-bit
                                                   :load-op :clear :store-op :store
                                                   :stencil-load-op :dont-care :stencil-store-op :dont-care
-                                                  :initial-layout :undefined :final-layout 1000001002))
+                                                  :initial-layout :undefined :final-layout :present-src-khr))
                                     (list :flags () :pipeline-bind-point :graphics
                                           :input-attachment-count 0 :input-attachments (null-pointer)
                                           :color-attachment-count 1 :color-attachments attach-ref
@@ -662,7 +662,7 @@
           (setf (mem-aref swapchains 'vk:swapchain-khr 0) swapchain)
           (setf (mem-aref indices :uint32 0) image-index)
           (setf (mem-ref present-info '(:struct vk:present-info-khr))
-                (list :s-type 1000001001 :next (null-pointer)
+                (list :s-type :present-info-khr :next (null-pointer)
                       :wait-semaphore-count 1 :wait-semaphores wait-semaphores
                       :swapchain-count 1 :swapchains swapchains
                       :image-indices indices :results (null-pointer)))
