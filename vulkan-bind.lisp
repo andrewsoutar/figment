@@ -284,9 +284,9 @@
                          (elem (gethash type type-table)))
                     (when (and sym require-type-func) (apply require-type-func type-desc))
                     (match-ecase (get-attribute elem "category")
-                      ;; FIXME I don't think we necessarily know that it's supposed to be a uint32
                       ("basetype" (assert sym) sym)
                       ("funcpointer" :pointer)
+                      ;; FIXME I don't think we necessarily know that it's supposed to be a uint32
                       ((m:or "enum" "bitmask") (or sym :uint32))
                       ("struct" `(:struct ,(or sym (error "Struct ~A does not have a name!" type))))
                       ("union" `(:union ,(or sym (error "Union ~A does not have a name!" type))))
