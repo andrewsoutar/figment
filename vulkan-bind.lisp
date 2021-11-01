@@ -133,7 +133,12 @@
 (defun eval-c-expr (expr const-table)
   (match-ecase expr
     (('- expr) (- (eval-c-expr expr const-table)))
-    ((:var var) (parse-integer (get-attribute (gethash var const-table) "value")))
+    ((:var var)
+     (match-ecase (gethash var const-table)
+       ((m:and element (m:satisfies #'dom:element-p))
+        ;; FIXME this doesn't cover the case of bits, etc.
+        (eval-c-expr (parse-expression (get-attribute element "value")) const-table))
+       ((:synthetic-const val) val)))
     ((m:type atom) expr)))
 
 (defun vulkan-tag-split (name tag)
@@ -469,9 +474,10 @@
                                                         ("-" -1))
                                                       (+ 1000000000 (* (1- extension-num) 1000)
                                                          (parse-integer offset)))
-                                                   (ash 1 (parse-integer (get-attribute required-thing "bitpos"))))))
-                                      (push `(:synthetic-enum ,(get-attribute required-thing "name") ,value)
-                                            (gethash extended enum-table))))
+                                                   (ash 1 (parse-integer (get-attribute required-thing "bitpos")))))
+                                          (name (get-attribute required-thing "name")))
+                                      (push `(:synthetic-enum ,name ,value) (gethash extended enum-table))
+                                      (push `(:synthetic-const ,value) (gethash name const-table))))
                                   ())
                                  ("command" (let ((symbol (unvulkanize-func-name name author-tag package)))
                                               (push symbol syms)
