@@ -1,6 +1,9 @@
 (uiop:define-package #:com.andrewsoutar.figment/wayland
-  (:use #:cl #:cffi #:com.andrewsoutar.cl-wayland-client)
-  (:use #:com.andrewsoutar.figment/utils))
+  (:use #:cl #:cffi #:com.andrewsoutar.cl-wayland-client
+        #:com.andrewsoutar.cl-wayland-client.protocol/stable/xdg-shell/xdg-shell
+        #:com.andrewsoutar.cl-wayland-client.protocol/unstable/xdg-decoration/xdg-decoration-unstable-v1)
+  (:use #:com.andrewsoutar.figment/utils)
+  (:import-from #:uiop #:define-package))
 (cl:in-package #:com.andrewsoutar.figment/wayland)
 
 (defclass recording-registry (wl-registry)
